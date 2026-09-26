@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: #08090B;
+  color: #E6E9EE;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection { background: rgba(34, 211, 238, 0.28); }
+
+* { scrollbar-width: thin; scrollbar-color: #2a313a transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #232a33; border-radius: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+.font-mono, code, pre { font-family: 'JetBrains Mono', monospace; }
+
+.surface { background: #0E1013; border: 1px solid rgba(255,255,255,0.08); }
+.surface-2 { background: #14171B; border: 1px solid rgba(255,255,255,0.08); }
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.tick-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: #6b7684; }
+
+:focus-visible {
+  outline: 2px solid #22D3EE;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+.cmd-kbd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: #9aa4b2;
+  background: rgba(255,255,255,0.04);
+}
