@@ -1,73 +1,171 @@
-import { X } from 'lucide-react';
-import { SENSORS } from '../../data/generator';
-import { statusColor } from '../../data/generator';
-import { api } from '../../services/api';
-import { useApp } from '../../store/AppContext';
+import { useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { X, ArrowRight, Columns2, Zap, History } from 'lucide-react'
+import { useAppStore } from '@/store/useAppStore'
+import { getEngine, getTelemetry, getPrediction } from '@/data/db'
+import { EngineBadge } from './engineBits'
+import { Sparkline } from '@/components/charts/Sparkline'
+import { fmtSensor } from '@/lib/format'
+import { pushRecent } from '@/commands/registry'
+import { cn } from '@/lib/utils'
 
-export function EngineExplorer() {
-  const { selectedEngineId, setSelectedEngineId, openTwin } = useApp();
-  if (selectedEngineId == null) return null;
-  const e = api.getEngine(selectedEngineId);
-  if (!e) return null;
-  const series = api.getSeries(e.id);
-  const cur = series?.points[series.points.length - 1];
-  const c = statusColor(e.status);
+export default function EngineExplorer() {
+  const engineId = useAppStore((s) => s.explorerEngineId)
+  const close = useAppStore((s) => s.closeExplorer)
+  const tempUnit = useAppStore((s) => s.tempUnit)
+  const setCompareIds = useAppStore((s) => s.setCompareIds)
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (engineId) pushRecent(engineId)
+  }, [engineId])
+
+  const engine = engineId ? getEngine(engineId) : undefined
+  const bundle = engine ? getTelemetry(engine.id) : undefined
+  const prediction = engine ? getPrediction(engine.id) : undefined
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && engineId) close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [engineId, close])
+
+  if (!engineId || !engine || !bundle || !prediction) return null
+
+  const snapshotSensors = ['T24', 'Ps30', 'Nc']
+  const rulColor = engine.status === 'critical' ? 'var(--crit)' : engine.status === 'warning' ? 'var(--warn)' : 'var(--ok)'
 
   return (
-    <aside
-      className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-[360px] animate-slide-in flex-col border-l border-line bg-panel/98 shadow-glow backdrop-blur"
-      role="complementary" aria-label={`Engine ${e.label} explorer`}
-    >
-      <div className="flex items-center justify-between border-b border-line px-5 py-4">
-        <div>
-          <div className="font-mono text-[10px] tracking-[0.2em] text-muted2">ENGINE EXPLORER · PROGRESSIVE DISCLOSURE</div>
-          <h2 className="text-lg font-extrabold tracking-tight">{e.label}</h2>
-        </div>
-        <button onClick={() => setSelectedEngineId(null)} aria-label="Close explorer" className="rounded-lg border border-line p-1.5 text-muted2 hover:text-white"><X size={16} /></button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-5">
-        <div className="mb-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] font-bold" style={{ borderColor: c + '55', background: c + '14', color: c }} role="status">
-          <span className="h-2 w-2 rounded-full animate-pulse-dot" style={{ background: c }} aria-hidden />
-          {e.status === 'NOMINAL' ? '● NOMINAL — operating normally' : `▲ ${e.status} — attention advised`}
-          <span className="sr-only">Status {e.status}</span>
-        </div>
-        <div className="surface-2 rounded-xl p-4">
-          <div className="font-mono text-[10px] tracking-[0.2em] text-muted2">REMAINING USEFUL LIFE</div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-extrabold tabular-nums">{e.rul}</span>
-            <span className="text-sm text-muted2">cycles</span>
-            <span className="ml-auto font-mono text-[11px] text-muted2">conf {e.confidence}%</span>
+    <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label={`Engine ${engine.id} explorer panel`}>
+      <div className="absolute inset-0 bg-black/35 animate-fade-in lg:bg-transparent" onClick={close} />
+      <aside
+        className="absolute bottom-0 left-0 right-0 max-h-[82vh] rounded-t-2xl border-t border-line-2 bg-surface-1/95 shadow-pop backdrop-blur-xl animate-rise-in lg:bottom-auto lg:left-auto lg:top-0 lg:h-full lg:max-h-none lg:w-[350px] lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-t-0 lg:animate-slide-left"
+        aria-label="Engine details"
+      >
+        <div className="flex items-center justify-between border-b border-line px-4 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <h2 className="font-display text-[15px] font-semibold tracking-tight">Engine #{engine.id}</h2>
+            <EngineBadge status={engine.status} />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <div className="rounded-lg bg-black/30 p-2.5"><div className="font-mono text-[10px] text-muted2">HEALTH</div><div className="text-xl font-bold tabular-nums">{e.health}%</div></div>
-            <div className="rounded-lg bg-black/30 p-2.5"><div className="font-mono text-[10px] text-muted2">RISK</div><div className="text-xl font-bold tabular-nums" style={{ color: c }}>{e.risk}%</div></div>
-          </div>
+          <button className="icon-btn" onClick={close} aria-label="Close engine panel">
+            <X size={15} />
+          </button>
         </div>
-        <div className="mt-4">
-          <div className="mb-2 font-mono text-[10px] tracking-[0.2em] text-muted2">TELEMETRY · CYCLE {e.currentCycle}</div>
-          <div className="space-y-1.5">
-            {['T24', 'P30', 'Nc', 'VIB'].map((k) => {
-              const def = SENSORS.find((s) => s.key === k)!;
-              const v = cur?.values[k];
-              return (
-                <div key={k} className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-raised px-3 py-2">
-                  <span className="text-[13px] text-muted2">{def.name}</span>
-                  <span className="font-mono text-[13px] font-bold tabular-nums">{v} <span className="text-[10px] font-medium text-muted2">{def.unit}</span></span>
+
+        <div className="max-h-[calc(82vh-56px)] space-y-4 overflow-y-auto p-4 lg:max-h-[calc(100vh-56px)]">
+          <div className="flex items-baseline gap-2.5">
+            <span className="stat-num text-[34px] font-semibold leading-none" style={{ color: rulColor }}>
+              {engine.rul}
+            </span>
+            <span className="text-[11px] text-ink-3">cycles of remaining useful life</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5">
+            {(
+              [
+                ['Health', `${engine.health}%`, engine.health >= 70 ? 'var(--ok)' : engine.health >= 50 ? 'var(--warn)' : 'var(--crit)'],
+                ['Risk', `${engine.risk}%`, engine.risk >= 70 ? 'var(--crit)' : engine.risk >= 40 ? 'var(--warn)' : 'var(--ok)'],
+                ['Current cycle', `${engine.currentCycle}`, 'var(--ink1)'],
+                ['Confidence', `${Math.round(engine.confidence * 100)}%`, 'var(--info)']
+              ] as const
+            ).map(([label, value, color]) => (
+              <div key={label} className="rounded-xl border border-line bg-surface-2 p-2.5">
+                <div className="eyebrow">{label}</div>
+                <div className="stat-num mt-1 text-[17px] font-semibold" style={{ color }}>
+                  {value}
                 </div>
-              );
-            })}
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-xl border border-line bg-surface-2 p-2.5">
+            <div className="eyebrow mb-1.5">Health trajectory</div>
+            <div className="h-14">
+              <Sparkline values={bundle.health.slice(-90)} color={rulColor} />
+            </div>
+            <div className="mt-1 flex justify-between text-[9.5px] text-ink-3">
+              <span>cycle {Math.max(0, engine.currentCycle - 89)}</span>
+              <span>now</span>
+            </div>
+          </div>
+
+          <div>
+            <div className="eyebrow mb-2">Telemetry · last cycle</div>
+            <div className="space-y-1.5">
+              {snapshotSensors.map((sid) => (
+                <div key={sid} className="flex items-center justify-between rounded-lg border border-line bg-surface-2 px-3 py-2 text-[12px]">
+                  <span className="text-ink-2">
+                    <span className="stat-num mr-2 text-[10px] text-ink-3">{sid}</span>
+                    {sid === 'T24' ? 'LPC Temp' : sid === 'Ps30' ? 'Static Pres' : 'Core Speed'}
+                  </span>
+                  <span className="stat-num font-semibold text-ink-1">{fmtSensor(sid, engine.sensorSnapshot[sid], tempUnit)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {bundle.anomalies.length > 0 && (
+            <div>
+              <div className="eyebrow mb-2">Recent anomalies</div>
+              <div className="space-y-1.5">
+                {bundle.anomalies.slice(0, 2).map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => {
+                      close()
+                      navigate(`/engine/${engine.id}?cycle=${a.cycle}`)
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg border border-line bg-surface-2 px-3 py-2 text-left transition-colors hover:border-line-2"
+                  >
+                    <History size={12} className={a.severity === 'critical' ? 'text-crit' : a.severity === 'warning' ? 'text-warn' : 'text-info'} />
+                    <span className="min-w-0 flex-1 text-[11.5px] text-ink-2">
+                      <span className="font-semibold text-ink-1">{a.sensorId}</span> at cycle {a.cycle}
+                    </span>
+                    <span className={cn('stat-num text-[11px] font-semibold', a.deviation > 0 ? 'text-warn' : 'text-info')}>
+                      {a.deviation > 0 ? '+' : ''}{a.deviation}%
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2 pt-1">
+            <button
+              className="btn btn-primary w-full"
+              onClick={() => {
+                close()
+                navigate(`/engine/${engine.id}`)
+              }}
+            >
+              Open Digital Twin <ArrowRight size={13} />
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className="btn"
+                onClick={() => {
+                  setCompareIds([engine.id, engine.id === '071' ? '024' : '071'])
+                  close()
+                  navigate(`/compare/${engine.id}/${engine.id === '071' ? '024' : '071'}`)
+                }}
+              >
+                <Columns2 size={13} /> Compare
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  close()
+                  navigate(`/engine/${engine.id}?simulate=1`)
+                }}
+              >
+                <Zap size={13} /> What-if
+              </button>
+            </div>
           </div>
         </div>
-        <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.06] p-3 text-[12px] leading-relaxed text-cyan-100/90">
-          <span className="font-bold text-cyan-300">✦ Model insight —</span> sustained degradation pattern across recent cycles. Most relevant: Temperature · Pressure · Sensor 11. Estimated RUL {e.rul} cycles.
-        </div>
-      </div>
-      <div className="border-t border-line p-4">
-        <button onClick={() => openTwin(e.id)} className="w-full rounded-xl bg-white py-2.5 text-[14px] font-bold text-black transition hover:bg-cyan-200" aria-label={`Open digital twin for ${e.label}`}>
-          Open Digital Twin →
-        </button>
-        <div className="mt-2 text-center font-mono text-[10px] text-muted2">ESC to close · E to toggle</div>
-      </div>
-    </aside>
-  );
+      </aside>
+    </div>
+  )
 }

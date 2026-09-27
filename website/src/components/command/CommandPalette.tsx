@@ -1,115 +1,194 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Search } from 'lucide-react';
-import { api } from '../../services/api';
-import { useApp } from '../../store/AppContext';
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Search, CornerDownLeft, ArrowUpDown, Command as CommandIcon } from 'lucide-react'
+import { useAppStore } from '@/store/useAppStore'
+import { useCommands, getRecents, pushRecent, type CommandItem } from '@/commands/registry'
+import { fuzzySearch } from '@/lib/fuzzy'
+import { getEngines } from '@/data/db'
+import { cn } from '@/lib/utils'
+import { STATUS_META } from '@/types/engine'
 
-function fuzzy(hay: string, needle: string): boolean {
-  hay = hay.toLowerCase(); needle = needle.toLowerCase().trim();
-  if (!needle) return true;
-  let hi = 0;
-  for (let ni = 0; ni < needle.length; ni++) {
-    const c = needle[ni];
-    if (c === ' ') continue;
-    hi = hay.indexOf(c, hi);
-    if (hi === -1) return false;
-    hi++;
-  }
-  return true;
+const GROUP_ORDER: CommandItem['group'][] = ['recent', 'intelligence', 'actions', 'navigation', 'engines', 'sensors']
+const GROUP_LABELS: Record<CommandItem['group'], string> = {
+  recent: 'Recent',
+  intelligence: 'AI Intent',
+  actions: 'Actions',
+  navigation: 'Navigation',
+  engines: 'Engines',
+  sensors: 'Sensors'
 }
 
-export function CommandPalette() {
-  const { commandOpen, setCommandOpen, setView, setSelectedEngineId, openTwin, setPrimarySensor, setFleetQuery, setFleetStatus, setCompareA, setCompareB } = useApp();
-  const [q, setQ] = useState('');
-  const [idx, setIdx] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const engines = useMemo(() => api.getEngines(), []);
+const BADGE_TONE: Record<string, string> = {
+  nominal: 'border-info/30 bg-info/10 text-info',
+  warning: 'border-warn/30 bg-warn/10 text-warn',
+  critical: 'border-crit/30 bg-crit/10 text-crit',
+  info: 'border-line-2 bg-surface-3 text-ink-2'
+}
 
-  useEffect(() => {
-    if (commandOpen) { setQ(''); setIdx(0); setTimeout(() => inputRef.current?.focus(), 30); }
-  }, [commandOpen]);
+export default function CommandPalette() {
+  const open = useAppStore((s) => s.paletteOpen)
+  const setOpen = useAppStore((s) => s.setPaletteOpen)
+  const [query, setQuery] = useState('')
+  const [sel, setSel] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
+  const { items, dynamic } = useCommands(query)
+  const engines = useMemo(() => getEngines(), [])
+  const recents = useMemo(() => getRecents(), [open])
 
   const results = useMemo(() => {
-    const out: { group: string; label: string; hint: string; run: () => void }[] = [];
-    const ql = q.toLowerCase();
-    // smart interpretations
-    if (/lowest rul|critical|high risk/.test(ql)) {
-      const worst = [...engines].sort((a, b) => a.rul - b.rul).slice(0, 5);
-      worst.forEach((e) => out.push({ group: 'SMART · LOWEST RUL', label: `${e.label} — RUL ${e.rul} · ${e.status}`, hint: 'Open twin', run: () => openTwin(e.id) }));
-      out.push({ group: 'SMART', label: 'Show all critical engines in Fleet', hint: 'Filter', run: () => { setFleetStatus('CRITICAL'); setFleetQuery(''); setView('fleet'); } });
+    if (!query.trim()) {
+      const recentItems: CommandItem[] = recents
+        .map((id) => engines.find((e) => e.id === id))
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((e) => ({
+          id: `recent-${e!.id}`,
+          title: `Engine #${e!.id}`,
+          subtitle: `RUL ${e!.rul} · Health ${e!.health}%`,
+          group: 'recent' as const,
+          keywords: '',
+          icon: <CommandIcon size={15} />,
+          perform: () => {
+            pushRecent(e!.id)
+            useAppStore.getState().openExplorer(e!.id)
+          }
+        }))
+      const base = items.filter((i) => i.group === 'actions' || i.group === 'navigation').slice(0, 11)
+      return [...recentItems, ...base]
     }
-    if (/compare/.test(ql)) {
-      const nums = (ql.match(/\d+/g) ?? []).map(Number).filter((n) => n >= 1 && n <= 100);
-      const a = nums[0] ?? 24, b = nums[1] ?? 71;
-      out.push({ group: 'ACTION', label: `Compare Engine ${a} and ${b}`, hint: 'Split view', run: () => { setCompareA(a); setCompareB(b); setView('predictions'); } });
+    const intentItems = dynamic
+    const scored = fuzzySearch(query, items, (i) => `${i.title} ${i.subtitle ?? ''} ${i.keywords}`, 14)
+    const scoredItems = scored.map((s) => s.item)
+    const seen = new Set<string>()
+    return [...intentItems, ...scoredItems].filter((i) => (seen.has(i.id) ? false : (seen.add(i.id), true))).slice(0, 16)
+  }, [query, items, dynamic, recents, engines])
+
+  const grouped = useMemo(() => {
+    const groups: { group: CommandItem['group']; items: CommandItem[] }[] = []
+    for (const g of GROUP_ORDER) {
+      const gi = results.filter((r) => r.group === g)
+      if (gi.length) groups.push({ group: g, items: gi })
     }
-    if (/temp/.test(ql)) {
-      out.push({ group: 'SENSOR', label: 'Temperature (T24) — analyze signal', hint: 'Telemetry', run: () => { setPrimarySensor('T24'); setView('telemetry'); } });
+    return groups
+  }, [results])
+
+  const flat = useMemo(() => grouped.flatMap((g) => g.items), [grouped])
+
+  useEffect(() => {
+    if (open) {
+      setQuery('')
+      setSel(0)
+      requestAnimationFrame(() => inputRef.current?.focus())
     }
-    if (/alert/.test(ql)) out.push({ group: 'NAVIGATION', label: 'Show alerts timeline', hint: 'Go', run: () => setView('alerts') });
+  }, [open])
 
-    engines.filter((e) => fuzzy(`${e.label} engine ${e.id} ${e.status} rul ${e.rul}`, q)).slice(0, 6).forEach((e) =>
-      out.push({ group: 'ENGINES', label: `${e.label} — RUL ${e.rul} · ${e.health}% health`, hint: e.status, run: () => setSelectedEngineId(e.id) }),
-    );
-    [
-      { label: 'Open Fleet map', hint: 'Navigation', run: () => setView('fleet') },
-      { label: 'Run RUL prediction (Engine twin)', hint: 'Action', run: () => setView('twin') },
-      { label: 'Compare Engines 24 and 71', hint: 'Action', run: () => { setCompareA(24); setCompareB(71); setView('predictions'); } },
-      { label: 'Analyze Temperature sensor', hint: 'Telemetry', run: () => { setPrimarySensor('T24'); setView('telemetry'); } },
-      { label: 'Open Model insights', hint: 'Navigation', run: () => setView('models') },
-      { label: 'Overview command center', hint: 'Navigation', run: () => setView('overview') },
-    ].filter((a) => fuzzy(a.label, q)).forEach((a) => out.push({ group: 'ACTIONS', label: a.label, hint: a.hint, run: a.run }));
-    ['Overview', 'Fleet', 'Telemetry', 'Predictions', 'Alerts', 'Models'].filter((n) => fuzzy(n, q)).forEach((n) =>
-      out.push({ group: 'NAVIGATION', label: `Go to ${n}`, hint: 'Go', run: () => setView(n.toLowerCase() as any) }),
-    );
-    return out.slice(0, 14);
-  }, [q, engines, openTwin, setView, setSelectedEngineId, setPrimarySensor, setFleetStatus, setFleetQuery, setCompareA, setCompareB]);
+  useEffect(() => {
+    setSel(0)
+  }, [query])
 
-  useEffect(() => setIdx(0), [q]);
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${sel}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [sel])
 
-  if (!commandOpen) return null;
+  if (!open) return null
+
+  const run = (item: CommandItem) => {
+    setOpen(false)
+    item.perform()
+  }
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/60 p-4 pt-[12vh] backdrop-blur-sm" onClick={() => setCommandOpen(false)} role="presentation">
-      <div
-        className="w-full max-w-[560px] animate-fade-up overflow-hidden rounded-2xl border border-white/10 bg-[#0E1013] shadow-glow"
-        onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Command palette"
-      >
-        <div className="flex items-center gap-3 border-b border-line px-4 py-3">
-          <Search size={16} className="text-muted2" />
+    <div className="fixed inset-0 z-[90] flex items-start justify-center px-4 pt-[14vh] pb-6" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div className="absolute inset-0 bg-black/55 backdrop-blur-[3px] animate-fade-in" onClick={() => setOpen(false)} />
+      <div className="relative w-full max-w-[560px] overflow-hidden rounded-xl border border-line-2 bg-surface-2/95 shadow-pop backdrop-blur-xl animate-rise-in">
+        <div className="flex items-center gap-3 border-b border-line px-4">
+          <Search size={15} className="shrink-0 text-ink-3" />
           <input
-            ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)}
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'ArrowDown') { e.preventDefault(); setIdx((i) => Math.min(results.length - 1, i + 1)); }
-              if (e.key === 'ArrowUp') { e.preventDefault(); setIdx((i) => Math.max(0, i - 1)); }
-              if (e.key === 'Enter' && results[idx]) { results[idx].run(); setCommandOpen(false); }
-              if (e.key === 'Escape') setCommandOpen(false);
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                setSel((s) => Math.min(s + 1, flat.length - 1))
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                setSel((s) => Math.max(s - 1, 0))
+              } else if (e.key === 'Enter') {
+                e.preventDefault()
+                if (flat[sel]) run(flat[sel])
+              } else if (e.key === 'Escape') {
+                setOpen(false)
+              } else if (e.key === 'Tab') {
+                e.preventDefault()
+              }
             }}
-            placeholder="Search engines, sensors, actions…  try “lowest RUL” or “compare 24 and 71”"
-            className="w-full bg-transparent text-[14px] outline-none placeholder:text-muted2"
-            aria-label="Command search"
+            placeholder="Search engines, sensors, actions… try “compare 24 and 71” or “lowest RUL”"
+            className="h-12 w-full bg-transparent text-[13.5px] text-ink-1 outline-none placeholder:text-ink-3"
+            aria-label="Search commands"
+            spellCheck={false}
           />
-          <span className="cmd-kbd">ESC</span>
+          <span className="kbd shrink-0">esc</span>
         </div>
-        <div className="max-h-[380px] overflow-y-auto p-2" role="listbox" aria-label="Results">
-          {!results.length && <div className="p-6 text-center text-sm text-muted2">No matches. Try “engine 24”, “critical engines”, “temperature sensor”.</div>}
-          {results.map((r, i) => (
-            <button
-              key={i} role="option" aria-selected={i === idx}
-              onMouseEnter={() => setIdx(i)}
-              onClick={() => { r.run(); setCommandOpen(false); }}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] ${i === idx ? 'bg-cyan-400/10 text-white' : 'text-muted2'}`}
-            >
-              <span className="font-mono text-[9px] tracking-widest text-muted2/80">{r.group}</span>
-              <span className="flex-1 truncate font-medium">{r.label}</span>
-              <span className="flex items-center gap-1 font-mono text-[10px] text-muted2">{r.hint}<ArrowRight size={12} /></span>
-            </button>
+
+        <div ref={listRef} className="max-h-[46vh] overflow-y-auto overscroll-contain p-1.5" role="listbox" aria-label="Command results">
+          {grouped.map((g) => (
+            <div key={g.group} className="mb-1">
+              <div className="px-2.5 pb-1 pt-2 text-[9.5px] font-semibold uppercase tracking-[0.16em] text-ink-3">{GROUP_LABELS[g.group]}</div>
+              {g.items.map((item) => {
+                const idx = flat.indexOf(item)
+                const active = idx === sel
+                return (
+                  <button
+                    key={item.id}
+                    data-idx={idx}
+                    role="option"
+                    aria-selected={active}
+                    onMouseEnter={() => setSel(idx)}
+                    onClick={() => run(item)}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors',
+                      active ? 'bg-accent/15' : 'hover:bg-white/[0.04]'
+                    )}
+                  >
+                    <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-md border', active ? 'border-accent/40 bg-accent/15 text-[#aab4ff]' : 'border-line bg-surface-3 text-ink-2')}>
+                      {item.icon}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-medium text-ink-1">{item.title}</span>
+                      {item.subtitle && <span className="block truncate text-[11px] text-ink-3">{item.subtitle}</span>}
+                    </span>
+                    {item.badge && (
+                      <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide', BADGE_TONE[item.badge.tone])}>
+                        {item.badge.label}
+                      </span>
+                    )}
+                    {active && <CornerDownLeft size={12} className="shrink-0 text-ink-3" />}
+                  </button>
+                )
+              })}
+            </div>
           ))}
+          {!results.length && (
+            <div className="flex flex-col items-center gap-1.5 px-4 py-10 text-center">
+              <span className="text-[13px] text-ink-2">No matches for “{query}”</span>
+              <span className="text-[11px] text-ink-3">Try “engine 24”, “temperature sensor”, “critical engines” or “compare 24 and 71”</span>
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-4 border-t border-line px-4 py-2 font-mono text-[10px] text-muted2">
-          <span><span className="cmd-kbd">↑↓</span> navigate</span>
-          <span><span className="cmd-kbd">↵</span> select</span>
-          <span className="ml-auto">RECENT → Engine #024 · Engine #071</span>
+
+        <div className="flex items-center justify-between border-t border-line px-4 py-2 text-[10px] text-ink-3">
+          <span className="flex items-center gap-1.5">
+            <ArrowUpDown size={11} /> navigate
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="kbd">↵</span> run command
+          </span>
         </div>
       </div>
     </div>
-  );
+  )
 }

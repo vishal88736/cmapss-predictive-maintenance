@@ -1,64 +1,76 @@
-import { X } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { useApp } from '../../store/AppContext';
+import { useState } from 'react'
+import { ChevronDown, Radio, Cpu, CloudLightning, Database } from 'lucide-react'
+import { useAppStore } from '@/store/useAppStore'
+import { useNow } from '@/lib/hooks'
+import { fmtTime } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
-export function SystemStatus() {
-  const { sysOpen, setSysOpen, presentationMode } = useApp();
-  const [now, setNow] = useState('14:32:08');
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date().toISOString().slice(11, 19)), 1000);
-    return () => clearInterval(t);
-  }, []);
-  if (presentationMode) return null;
+const SERVICES = [
+  { id: 'stream', label: 'Telemetry stream', state: 'CONNECTED', icon: Radio },
+  { id: 'ml', label: 'ML inference', state: 'READY', icon: Cpu },
+  { id: 'pred', label: 'Prediction service', state: 'ONLINE', icon: CloudLightning }
+]
+
+export default function SystemStatus() {
+  const [open, setOpen] = useState(false)
+  const lastSync = useAppStore((s) => s.lastSync)
+  const liveFeed = useAppStore((s) => s.liveFeed)
+  const now = useNow(1000)
+
   return (
-    <>
-      <button
-        onClick={() => setSysOpen(!sysOpen)}
-        aria-expanded={sysOpen}
-        aria-label="System status, activate to expand diagnostics"
-        className="fixed bottom-20 right-4 z-40 w-[218px] rounded-xl border border-line bg-panel/95 p-3 text-left shadow-glow backdrop-blur transition hover:border-white/20"
-      >
-        <div className="mb-2 flex items-center justify-between">
-          <span className="font-mono text-[10px] font-bold tracking-[0.2em] text-muted2">SYSTEM</span>
-          <span className="flex items-center gap-1 font-mono text-[10px] text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse-dot" />LIVE</span>
-        </div>
-        <StatusRow label="Telemetry stream" value="CONNECTED" ok />
-        <StatusRow label="ML inference" value="READY" ok />
-        <StatusRow label="Prediction svc" value="ONLINE" ok />
-        <div className="mt-2 border-t border-line pt-1.5 font-mono text-[10px] text-muted2">Last sync <span className="text-white">{now}</span></div>
-      </button>
-      {sysOpen && (
-        <div className="fixed bottom-20 right-[240px] z-40 w-[300px] animate-slide-in rounded-xl border border-line bg-panel p-4 shadow-glow" role="dialog" aria-label="System diagnostics">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-sm font-bold">Diagnostics</span>
-            <button onClick={() => setSysOpen(false)} aria-label="Close diagnostics"><X size={16} /></button>
-          </div>
-          {[
-            ['Ingest throughput', '4,812 msgs/s · p99 38ms'],
-            ['Feature pipeline', 'C-MAPSS window=30 · normalized'],
-            ['LSTM v2.4 latency', '42ms median · GPU:1'],
-            ['Prediction drift', '0.8% · within tolerance'],
-            ['Data freshness', 'FD001–FD004 mirrors synced'],
-          ].map(([k, v]) => (
-            <div key={k} className="mb-2 flex items-start justify-between gap-3 border-b border-white/[0.05] pb-2 last:border-0">
-              <span className="text-[12px] text-muted2">{k}</span>
-              <span className="text-right font-mono text-[11px] text-white">{v}</span>
+    <div className="pointer-events-auto fixed bottom-4 left-4 z-40 hidden md:block">
+      <div className={cn('w-[210px] animate-rise-in rounded-xl border border-line bg-surface-2/90 shadow-card backdrop-blur-lg transition-all duration-200', open && 'w-[250px]')}>
+        <button
+          className="flex w-full items-center justify-between px-3 pt-2.5 text-left"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-label={`System status. Telemetry connected, ML ready, predictions online. Last sync ${fmtTime(lastSync)}. Click to ${open ? 'collapse' : 'expand'} diagnostics.`}
+        >
+          <span className="panel-title">System</span>
+          <ChevronDown size={12} className={cn('text-ink-3 transition-transform duration-200', open && 'rotate-180')} />
+        </button>
+        <div className="space-y-1.5 px-3 pb-2 pt-1.5">
+          {SERVICES.map((s) => (
+            <div key={s.id} className="flex items-center justify-between text-[11px]">
+              <span className="flex items-center gap-2 text-ink-2">
+                <s.icon size={12} className="text-ink-3" />
+                {s.label}
+              </span>
+              <span className="flex items-center gap-1.5 font-mono text-[10px] font-semibold text-ok">
+                <span className="h-1.5 w-1.5 rounded-full bg-ok animate-pulse-dot" role="img" aria-label="status dot" />
+                {s.state}
+              </span>
             </div>
           ))}
-          <div className="mt-2 rounded-lg bg-emerald-400/10 p-2 text-[12px] text-emerald-300">● All subsystems nominal. No action required.</div>
+          <div className="flex items-center justify-between border-t border-line pt-1.5 text-[10px] text-ink-3">
+            <span>{liveFeed ? 'Live simulation active' : 'Live feed paused'}</span>
+            <span className="font-mono">{fmtTime(lastSync)}</span>
+          </div>
         </div>
-      )}
-    </>
-  );
-}
-
-function StatusRow({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
-  return (
-    <div className="flex items-center justify-between py-0.5">
-      <span className="flex items-center gap-1.5 text-[12px] text-muted2">
-        <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-amber-400'} animate-pulse-dot`} aria-hidden />{label}
-      </span>
-      <span className="font-mono text-[10px] font-bold text-white">{value}</span>
+        {open && (
+          <div className="animate-fade-in space-y-2 border-t border-line px-3 py-2.5 text-[10.5px]">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+              {[
+                ['Ingest rate', '48.2 cyc/s'],
+                ['Buffer', 'healthy'],
+                ['Model', 'LSTM v2.4'],
+                ['Inference', '38 ms'],
+                ['Units tracked', '100'],
+                ['Uptime', '99.98%']
+              ].map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between gap-2">
+                  <span className="text-ink-3">{k}</span>
+                  <span className="font-mono text-ink-2">{v}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 border-t border-line pt-2 text-ink-3">
+              <Database size={11} />
+              <span>FD001 · train/test synced {fmtTime(lastSync)} ({Math.max(0, Math.round((now - lastSync) / 1000))}s ago)</span>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
-  );
+  )
 }

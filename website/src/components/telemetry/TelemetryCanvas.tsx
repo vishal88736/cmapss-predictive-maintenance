@@ -1,96 +1,114 @@
-import { useMemo, useState } from 'react';
-import { Pin } from 'lucide-react';
-import { SENSORS } from '../../data/generator';
-import { api } from '../../services/api';
-import { useApp } from '../../store/AppContext';
-import { SensorInsight } from './SensorInsight';
+import { useMemo } from 'react'
+import { Pin, PinOff, Info } from 'lucide-react'
+import TelemetryChart from './TelemetryChart'
+import { SENSOR_CHANNELS } from '@/data/sensors'
+import { getSnapshot } from '@/data/db'
+import type { TelemetryBundle, Anomaly } from '@/types/telemetry'
+import type { Engine } from '@/types/engine'
+import { useAppStore } from '@/store/useAppStore'
+import { fmtSensor } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
-const COLORS: Record<string, string> = { T24: '#FBBF24', P30: '#22D3EE', S11: '#A78BFA', VIB: '#F87171', Nc: '#34D399' };
+const VI = { id: 'VI', short: 'Vibration', name: 'Vibration Index', derived: true }
 
-export function TelemetryCanvas({ engineId }: { engineId: number }) {
-  const { primarySensor, setPrimarySensor, pinned, togglePin, scrubCycle } = useApp();
-  const [inspectCycle, setInspectCycle] = useState<number | null>(null);
-  const series = api.getSeries(engineId);
-  const engine = api.getEngine(engineId);
-  const def = SENSORS.find((s) => s.key === primarySensor) ?? SENSORS[0];
+export default function TelemetryCanvas({ engine, bundle, scrub, onAnomalySelect }: { engine: Engine; bundle: TelemetryBundle; scrub: number; onAnomalySelect: (a: Anomaly) => void }) {
+  const primarySensor = useAppStore((s) => s.primarySensor)
+  const setPrimarySensor = useAppStore((s) => s.setPrimarySensor)
+  const pinnedSensors = useAppStore((s) => s.pinnedSensors)
+  const togglePin = useAppStore((s) => s.togglePin)
+  const tempUnit = useAppStore((s) => s.tempUnit)
 
-  const { pathMain, overlayPaths, anomalyPts, curVal, stats } = useMemo(() => {
-    if (!series) return { pathMain: '', overlayPaths: [] as string[], anomalyPts: [] as number[], curVal: 0, stats: { dev: 0 } };
-    const pts = series.points;
-    const W = 760, H = 220, PL = 46, PR = 12, PT = 12, PB = 24;
-    const build = (key: string) => {
-      const vals = pts.map((p) => p.values[key]);
-      const min = Math.min(...vals) * 0.998, max = Math.max(...vals) * 1.002;
-      const X = (i: number) => PL + (i / Math.max(1, pts.length - 1)) * (W - PL - PR);
-      const Y = (v: number) => PT + (1 - (v - min) / Math.max(1e-6, max - min)) * (H - PT - PB);
-      return { d: pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${X(i).toFixed(1)},${Y(p.values[key]).toFixed(1)}`).join(' '), X, Y, min, max, W, H, PL, PB, PT, PR };
-    };
-    const main = build(primarySensor);
-    const overlays = pinned.filter((p) => p !== primarySensor).slice(0, 2).map((p) => {
-      const b = build(p);
-      // normalize overlay into main's frame for comparison readability
-      return b.d;
-    });
-    const effCycle = scrubCycle ?? engine?.currentCycle ?? pts.length;
-    const cur = pts[Math.min(pts.length - 1, effCycle - 1)];
-    const mid = (def.expected[0] + def.expected[1]) / 2;
-    const dev = ((cur.values[primarySensor] - mid) / mid) * 100;
-    return { pathMain: main.d, overlayPaths: overlays, anomalyPts: pts.filter((p) => p.anomaly).map((p) => main.X(p.cycle - 1)), curVal: cur.values[primarySensor], stats: { dev }, geom: main };
-  }, [series, primarySensor, pinned, scrubCycle, engine, def]);
+  const snapshot = useMemo(() => getSnapshot(engine.id, Math.min(scrub, engine.currentCycle)), [engine.id, scrub, engine.currentCycle])
+  const primaryChannel = primarySensor === 'VI' ? VI : SENSOR_CHANNELS.find((c) => c.id === primarySensor)
+  const expected = bundle.expected[primarySensor]
+  const value = snapshot?.values[primarySensor] ?? 0
+  const dev = snapshot?.deviations[primarySensor] ?? 0
+  const devAbs = Math.abs(dev)
+  const devTone = devAbs > 4 ? 'text-crit' : devAbs > 2 ? 'text-warn' : 'text-ok'
+  const isPinned = pinnedSensors.includes(primarySensor)
 
-  if (!series || !engine) return null;
-  const effCycle = scrubCycle ?? engine.currentCycle;
+  const chips = [...SENSOR_CHANNELS.map((c) => ({ id: c.id, short: c.short, derived: false })), VI]
 
   return (
-    <div className="surface rounded-2xl p-4">
-      <div className="mb-1 flex flex-wrap items-center gap-2">
-        <span className="font-mono text-[10px] tracking-[0.2em] text-muted2">PRIMARY TELEMETRY CANVAS</span>
-        <div className="relative ml-2">
-          <select value={primarySensor} onChange={(e) => setPrimarySensor(e.target.value)} aria-label="Select primary sensor" className="appearance-none rounded-lg border border-line bg-raised py-1.5 pl-3 pr-8 text-[13px] font-bold outline-none">
-            {SENSORS.map((s) => <option key={s.key} value={s.key}>{s.name} ({s.key})</option>)}
-          </select>
-          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted2">▼</span>
+    <div className="card flex flex-col overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="eyebrow">Sensor</span>
+              <select
+                value={primarySensor}
+                onChange={(e) => setPrimarySensor(e.target.value)}
+                className="h-7 rounded-md border border-line bg-surface-2 px-2 text-[12px] font-semibold text-ink-1 outline-none focus:border-accent/50"
+                aria-label="Primary sensor"
+              >
+                {SENSOR_CHANNELS.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.id} — {c.name}
+                  </option>
+                ))}
+                <option value="VI">VI — Vibration Index (derived)</option>
+              </select>
+            </div>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="stat-num font-display text-[26px] font-bold leading-none">{fmtSensor(primarySensor, value, tempUnit)}</span>
+              <span className={cn('stat-num text-[11.5px] font-semibold', devTone)}>
+                {dev >= 0 ? '+' : ''}{dev.toFixed(1)}% dev
+              </span>
+              {primarySensor === 'VI' && (
+                <span className="chip !py-0 !text-[9px]">derived metric</span>
+              )}
+            </div>
+          </div>
         </div>
-        <span className="ml-auto font-mono text-[11px] text-muted2">CYCLE {effCycle} · PINS {pinned.length}/3</span>
+        {expected && (
+          <div className="text-right">
+            <div className="eyebrow">Expected band</div>
+            <div className="stat-num mt-0.5 text-[11.5px] text-ink-2">
+              {fmtSensor(primarySensor, expected[0], tempUnit, 1)} — {fmtSensor(primarySensor, expected[1], tempUnit, 1)}
+            </div>
+          </div>
+        )}
       </div>
-      <div className="flex items-baseline gap-3">
-        <span className="text-4xl font-extrabold tabular-nums">{curVal.toFixed(def.key === 'VIB' ? 3 : 1)} <span className="text-base font-semibold text-muted2">{def.unit}</span></span>
-        <span className={`rounded-full px-2 py-0.5 font-mono text-[11px] font-bold ${stats.dev > 1 ? 'bg-amber-400/15 text-amber-300' : 'bg-emerald-400/10 text-emerald-300'}`}>
-          {stats.dev >= 0 ? '+' : ''}{stats.dev.toFixed(1)}% deviation
+
+      <div className="min-h-[220px] flex-1 px-2 py-2">
+        <TelemetryChart
+          key={engine.id + primarySensor + pinnedSensors.join(',')}
+          bundle={bundle}
+          primarySensor={primarySensor}
+          pinnedSensors={pinnedSensors}
+          scrub={Math.min(scrub, engine.currentCycle)}
+          anomalies={bundle.anomalies}
+          tempUnit={tempUnit}
+          onAnomalySelect={onAnomalySelect}
+          className="h-full min-h-[210px] w-full"
+        />
+      </div>
+
+      <div className="flex items-center gap-1.5 overflow-x-auto border-t border-line px-3 py-2 no-scrollbar">
+        {chips.map((c) => {
+          const isPrimary = primarySensor === c.id
+          const pinned = pinnedSensors.includes(c.id)
+          return (
+            <div key={c.id} className={cn('chip shrink-0 !gap-1 !py-0.5 !pl-2.5 !pr-1', isPrimary && 'chip-active')}>
+              <button className="py-1 text-[10.5px]" onClick={() => setPrimarySensor(c.id)} aria-pressed={isPrimary}>
+                {c.short}
+              </button>
+              <button
+                className={cn('rounded p-1 transition-colors', pinned ? 'text-accent' : 'text-ink-3 hover:text-ink-1')}
+                onClick={() => togglePin(c.id)}
+                aria-label={pinned ? `Unpin ${c.short} overlay` : `Pin ${c.short} as overlay`}
+                aria-pressed={pinned}
+              >
+                {pinned ? <Pin size={10} /> : <PinOff size={10} />}
+              </button>
+            </div>
+          )
+        })}
+        <span className="ml-2 hidden shrink-0 items-center gap-1 text-[9.5px] text-ink-3 md:flex">
+          <Info size={10} /> pin to overlay
         </span>
       </div>
-      <svg viewBox="0 0 760 220" className="mt-2 w-full cursor-crosshair" role="img" aria-label={`${def.name} telemetry chart`}
-        onClick={(e) => {
-          const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
-          const frac = (e.clientX - rect.left) / rect.width;
-          setInspectCycle(Math.max(1, Math.min(series.points.length, Math.round(frac * series.points.length))));
-        }}>
-        {[0.2, 0.5, 0.8].map((f) => <line key={f} x1={46} y1={220 * f} x2={748} y2={220 * f} stroke="rgba(255,255,255,0.06)" />)}
-        {/* expected band */}
-        <rect x={46} y={60} width={702} height={60} fill="rgba(52,211,153,0.07)" />
-        <text x={52} y={72} className="tick-label">EXPECTED {def.expected[0]}–{def.expected[1]}</text>
-        {overlayPaths.map((d, i) => <path key={i} d={d} fill="none" stroke={COLORS[pinned.filter((p) => p !== primarySensor)[i]] ?? '#A78BFA'} strokeWidth={1.4} opacity={0.75} strokeDasharray={i === 0 ? undefined : '4 3'} />)}
-        <path d={pathMain} fill="none" stroke={COLORS[primarySensor] ?? '#E6E9EE'} strokeWidth={2.4} strokeLinecap="round" />
-        {anomalyPts.map((x, i) => <circle key={i} cx={x} cy={118} r={4} fill="#F87171" stroke="#08090B" strokeWidth={1.5} />)}
-        {/* scrub marker */}
-        <line x1={46 + ((effCycle - 1) / Math.max(1, series.points.length - 1)) * 702} y1={8} x2={46 + ((effCycle - 1) / Math.max(1, series.points.length - 1)) * 702} y2={196} stroke="#fff" strokeWidth={1.4} />
-      </svg>
-      <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Sensor selection">
-        {SENSORS.slice(0, 10).map((s) => {
-          const active = s.key === primarySensor;
-          const pin = pinned.includes(s.key);
-          return (
-            <span key={s.key} className={`flex items-center gap-1 rounded-full border py-1 pl-3 pr-1.5 text-[12px] ${active ? 'border-white/40 bg-white/10 text-white' : 'border-line text-muted2'}`}>
-              <button onClick={() => setPrimarySensor(s.key)} className="font-semibold" aria-pressed={active}>{s.short}</button>
-              <button onClick={() => togglePin(s.key)} aria-label={`${pin ? 'Unpin' : 'Pin'} ${s.name} overlay`} aria-pressed={pin} className={pin ? 'text-cyan-300' : 'text-muted2/60 hover:text-white'}>
-                <Pin size={12} fill={pin ? 'currentColor' : 'none'} />
-              </button>
-            </span>
-          );
-        })}
-      </div>
-      <div className="mt-2 font-mono text-[10px] text-muted2">Click chart to inspect a cycle · pin up to 3 overlays · model overlays are normalized for comparison</div>
-      {inspectCycle && <SensorInsight engineId={engineId} cycle={inspectCycle} sensor={primarySensor} onClose={() => setInspectCycle(null)} />}
     </div>
-  );
+  )
 }

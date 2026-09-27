@@ -1,66 +1,157 @@
-import { useState } from 'react';
-import { Sparkles } from 'lucide-react';
-import { useApp } from '../../store/AppContext';
-import { api } from '../../services/api';
+import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Sparkles, ArrowUp, X } from 'lucide-react'
+import { useAppStore } from '@/store/useAppStore'
+import { useCommands, type CommandItem } from '@/commands/registry'
+import { getEngines, getFleetStats } from '@/data/db'
+import { cn } from '@/lib/utils'
 
-export function AICommandBar({ context }: { context: string }) {
-  const { setView, openTwin, setFleetStatus, setPrimarySensor, setAiResponse, setCompareA, setCompareB } = useApp();
-  const [val, setVal] = useState('');
-  const [thinking, setThinking] = useState(false);
+interface Answer {
+  text: string
+  actions: CommandItem[]
+}
 
-  const run = (text: string) => {
-    const q = text.toLowerCase();
-    setThinking(true);
-    setTimeout(() => {
-      setThinking(false);
-      const engines = api.getEngines();
-      if (/lowest|critical|risk/.test(q)) {
-        const worst = [...engines].sort((a, b) => a.rul - b.rul).slice(0, 3);
-        setAiResponse(`Lowest-RUL engines: ${worst.map((e) => `#${String(e.id).padStart(3, '0')} (RUL ${e.rul}, ${e.status})`).join(' · ')}. Focused #${String(worst[0].id).padStart(3, '0')} for inspection.`);
-        openTwin(worst[0].id);
-      } else if (/why.*24|engine 24.*risk/.test(q)) {
-        setAiResponse('Engine #024 risk (68%) is driven by sustained T24 temperature drift (+8.4% above expected band) and P30 pressure variance across cycles 240–261. Model confidence 87%.');
-        openTwin(24);
-      } else if (/compare/.test(q)) {
-        const nums = (q.match(/\d+/g) ?? []).map(Number);
-        setCompareA(nums[0] || 24); setCompareB(nums[1] || 71);
-        setAiResponse(`Split-screen comparison armed: #${String(nums[0] || 24).padStart(3, '0')} vs #${String(nums[1] || 71).padStart(3, '0')}. Timelines synchronized.`);
-        setView('predictions');
-      } else if (/temp|abnormal/.test(q)) {
-        setPrimarySensor('T24');
-        setAiResponse('Isolated Temperature (T24): +2.8% fleet deviation, anomaly cluster at cycles 259–261 on #024. Pinned P30 overlay for cross-signal check.');
-        setView('telemetry');
-      } else if (/simulat/.test(q)) {
-        setAiResponse('What-if staged: +5% temperature scenario projects RUL 37 → ~29 cycles. Open the Digital Twin simulator to run the model.');
-        openTwin(24);
-      } else {
-        setFleetStatus('ALL');
-        setAiResponse(`Understood — “${text}”. Applied as fleet context filter and surfaced the most relevant engines. Use ⌘K for precise jumps.`);
-        setView('fleet');
+const SUGGESTIONS = [
+  'Which engines have the lowest RUL?',
+  'Why is Engine 24 at high risk?',
+  'Compare 24 and 71',
+  'Show abnormal temperature patterns',
+  'Simulate +5% temperature'
+]
+
+export default function AICommandBar({ contextLabel, className }: { contextLabel: string; className?: string }) {
+  const [query, setQuery] = useState('')
+  const [thinking, setThinking] = useState(false)
+  const [answer, setAnswer] = useState<Answer | null>(null)
+  const { dynamic } = useCommands(query)
+  const navigate = useNavigate()
+  const setPaletteOpen = useAppStore((s) => s.setPaletteOpen)
+  const engines = useMemo(() => getEngines(), [])
+  const stats = useMemo(() => getFleetStats(), [])
+
+  const computeAnswer = (q: string): Answer => {
+    const ql = q.toLowerCase()
+    if (/(lowest|shortest|worst).*(rul|life)|rul.*low/.test(ql)) {
+      const top = [...engines].sort((a, b) => a.rul - b.rul).slice(0, 3)
+      return {
+        text: `The shortest remaining useful lives are ${top.map((e) => `#${e.id} (${e.rul} cyc)`).join(', ')}. ${stats.criticalCount} engines are in critical state right now.`,
+        actions: dynamic
       }
-      setVal('');
-    }, 650);
-  };
+    }
+    if (/(how many|count|total).*(engine|critical|warning)/.test(ql)) {
+      return {
+        text: `Fleet: ${stats.monitored} engines monitored — ${stats.nominalCount} nominal, ${stats.warningCount} warning, ${stats.criticalCount} critical. Average health ${stats.health}%, average RUL ${stats.avgRul} cycles.`,
+        actions: []
+      }
+    }
+    if (/abnormal|anomal|deviat|temperature pattern/.test(ql)) {
+      const withAnoms = engines.filter((e) => e.anomalyCount > 0).slice(0, 3)
+      return {
+        text: withAnoms.length
+          ? `${withAnoms.map((e) => `#${e.id}`).join(', ')} show significant sensor deviations in the recent window. The strongest signal is on ${withAnoms[0].topSensors[0]}.`
+          : 'No significant deviations detected in the current window.',
+        actions: dynamic.length ? dynamic : []
+      }
+    }
+    if (dynamic.length) {
+      return {
+        text: 'I resolved this to an analytical action.',
+        actions: dynamic
+      }
+    }
+    return {
+      text: `I couldn't map that to a specific analysis for ${contextLabel.toLowerCase()}. Try asking about engines (“engine 24”), RUL rankings, comparisons (“compare 24 and 71”), sensors, or alerts.`,
+      actions: []
+    }
+  }
+
+  const submit = () => {
+    if (!query.trim() || thinking) return
+    setThinking(true)
+    const q = query
+    setTimeout(() => {
+      setAnswer(computeAnswer(q))
+      setThinking(false)
+    }, 550)
+  }
 
   return (
-    <div className="pointer-events-none fixed bottom-4 left-[64px] right-0 z-40 flex justify-center px-4">
-      <form
-        onSubmit={(e) => { e.preventDefault(); if (val.trim()) run(val); }}
-        className="pointer-events-auto flex w-full max-w-[640px] items-center gap-2 rounded-full border border-white/10 bg-panel/90 py-2 pl-4 pr-2 shadow-glow backdrop-blur"
-        role="search" aria-label="AI command bar"
-      >
-        <Sparkles size={15} className="shrink-0 text-cyan-300" />
-        <input
-          value={val} onChange={(e) => setVal(e.target.value)}
-          placeholder={thinking ? 'Reasoning over fleet state…' : `Ask about this ${context}…  e.g. “Which engines have the lowest RUL?”`}
-          className="w-full bg-transparent text-[13px] outline-none placeholder:text-muted2"
-          aria-label={`Ask about this ${context}`}
-        />
-        <span className="cmd-kbd hidden sm:block">⌘K</span>
-        <button type="submit" className="rounded-full bg-white px-3.5 py-1.5 text-[12px] font-bold text-black hover:bg-cyan-200" disabled={thinking}>
-          {thinking ? '…' : 'Ask'}
-        </button>
-      </form>
+    <div className={cn('relative', className)}>
+      {answer && (
+        <div className="absolute bottom-[calc(100%+10px)] left-0 right-0 z-30 animate-rise-in rounded-xl border border-accent/25 bg-surface-2/95 p-3.5 shadow-pop backdrop-blur-xl md:left-24 md:right-24">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-accent">
+              <Sparkles size={11} /> Model Insight
+            </span>
+            <button className="icon-btn h-6 w-6" onClick={() => setAnswer(null)} aria-label="Dismiss answer">
+              <X size={12} />
+            </button>
+          </div>
+          <p className="text-[12.5px] leading-relaxed text-ink-1">{answer.text}</p>
+          {answer.actions.length > 0 && (
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {answer.actions.slice(0, 2).map((a) => (
+                <button
+                  key={a.id}
+                  className="btn btn-primary h-7 px-2.5 text-[11px]"
+                  onClick={() => {
+                    a.perform()
+                    setAnswer(null)
+                  }}
+                >
+                  {a.icon}
+                  {a.title}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 overflow-x-auto rounded-xl border border-line bg-surface-2/80 px-2 py-1.5 shadow-card backdrop-blur-md no-scrollbar">
+        <Sparkles size={13} className="ml-1 shrink-0 text-accent" aria-hidden />
+        <div className="flex gap-1.5 no-scrollbar">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => {
+                setQuery(s)
+                setAnswer(null)
+              }}
+              className="chip whitespace-nowrap hover:border-accent/40 hover:text-ink-1"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex min-w-0 flex-1 items-center gap-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            placeholder={`Ask about ${contextLabel.toLowerCase()}…`}
+            aria-label={`Ask AI about ${contextLabel}`}
+            className="h-7 min-w-[120px] flex-1 bg-transparent text-[12px] text-ink-1 outline-none placeholder:text-ink-3"
+          />
+          <button
+            onClick={submit}
+            disabled={!query.trim() || thinking}
+            className="btn btn-primary h-7 shrink-0 gap-1 px-2.5 text-[11px]"
+            aria-label="Ask"
+          >
+            {thinking ? (
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 animate-pulse-dot rounded-full bg-accent" /> thinking…
+              </span>
+            ) : (
+              <>
+                Ask <ArrowUp size={11} />
+              </>
+            )}
+          </button>
+          <button onClick={() => setPaletteOpen(true)} className="kbd shrink-0" aria-label="Open command palette">⌘K</button>
+        </div>
+      </div>
     </div>
-  );
+  )
 }
