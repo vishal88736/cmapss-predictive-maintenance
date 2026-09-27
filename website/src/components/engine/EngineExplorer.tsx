@@ -39,9 +39,9 @@ export default function EngineExplorer() {
 
   return (
     <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label={`Engine ${engine.id} explorer panel`}>
-      <div className="absolute inset-0 bg-black/35 animate-fade-in lg:bg-transparent" onClick={close} />
+      <div className="absolute inset-0 bg-black/40 animate-fade-in lg:bg-transparent" onClick={close} />
       <aside
-        className="absolute bottom-0 left-0 right-0 max-h-[82vh] rounded-t-2xl border-t border-line-2 bg-surface-1/95 shadow-pop backdrop-blur-xl animate-rise-in lg:bottom-auto lg:left-auto lg:top-0 lg:h-full lg:max-h-none lg:w-[350px] lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-t-0 lg:animate-slide-left"
+        className="glass-strong absolute bottom-0 left-0 right-0 max-h-[82vh] rounded-t-2xl border-x-0 border-b-0 shadow-pop animate-rise-in lg:bottom-auto lg:left-auto lg:top-0 lg:h-full lg:max-h-none lg:w-[358px] lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-t-0 lg:animate-slide-left"
         aria-label="Engine details"
       >
         <div className="flex items-center justify-between border-b border-line px-4 py-3.5">

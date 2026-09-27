@@ -103,7 +103,7 @@ export default function CommandPalette() {
   return (
     <div className="fixed inset-0 z-[90] flex items-start justify-center px-4 pt-[14vh] pb-6" role="dialog" aria-modal="true" aria-label="Command palette">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[3px] animate-fade-in" onClick={() => setOpen(false)} />
-      <div className="relative w-full max-w-[560px] overflow-hidden rounded-xl border border-line-2 bg-surface-2/95 shadow-pop backdrop-blur-xl animate-rise-in">
+      <div className="glass-strong edge-lit relative w-full max-w-[580px] overflow-hidden rounded-2xl shadow-pop animate-scale-in">
         <div className="flex items-center gap-3 border-b border-line px-4">
           <Search size={15} className="shrink-0 text-ink-3" />
           <input

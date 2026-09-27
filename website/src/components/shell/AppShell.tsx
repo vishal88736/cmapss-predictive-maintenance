@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { Home, Orbit, TrendingUp, AlertTriangle, Command as CommandIcon } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import NavRail from './NavRail'
+import AmbientBackground from './AmbientBackground'
 import SystemStatus from './SystemStatus'
 import Toasts from './Toasts'
 import HelpOverlay from './HelpOverlay'
@@ -26,17 +27,40 @@ function MobileTabBar() {
     { to: '/alerts', label: 'Alerts', icon: AlertTriangle }
   ]
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-14 items-stretch border-t border-line bg-surface-1/90 backdrop-blur-xl md:hidden" aria-label="Mobile navigation">
-      {items.map((i) => (
-        <NavLink key={i.to} to={i.to} className={({ isActive }) => cn('flex flex-1 flex-col items-center justify-center gap-0.5 text-[9.5px] font-medium', isActive ? 'text-accent' : 'text-ink-3')}>
-          <i.icon size={17} strokeWidth={1.8} />
-          {i.label}
-        </NavLink>
-      ))}
-      <button className="flex flex-1 flex-col items-center justify-center gap-0.5 text-[9.5px] font-medium text-ink-3" onClick={() => setPaletteOpen(true)} aria-label="Open command palette">
-        <CommandIcon size={17} strokeWidth={1.8} />
-        Search
-      </button>
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-3 md:hidden"
+      aria-label="Mobile navigation"
+    >
+      <div className="glass-strong flex w-full max-w-md items-stretch justify-between rounded-2xl p-1.5 pb-safe shadow-rail">
+        {items.map((i) => (
+          <NavLink
+            key={i.to}
+            to={i.to}
+            className={({ isActive }) =>
+              cn(
+                'relative flex flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1.5 text-[9.5px] font-medium transition-all duration-300 ease-swift',
+                isActive ? 'text-ink-1' : 'text-ink-3'
+              )
+            }
+          >
+            {({ isActive }) => (
+              <>
+                {isActive && <span className="nav-active absolute inset-0 rounded-xl" />}
+                <i.icon size={17} strokeWidth={1.8} className="relative z-10" />
+                <span className="relative z-10">{i.label}</span>
+              </>
+            )}
+          </NavLink>
+        ))}
+        <button
+          className="flex flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1.5 text-[9.5px] font-medium text-ink-3 transition-colors hover:text-ink-1"
+          onClick={() => setPaletteOpen(true)}
+          aria-label="Open command palette"
+        >
+          <CommandIcon size={17} strokeWidth={1.8} />
+          Search
+        </button>
+      </div>
     </nav>
   )
 }
@@ -134,9 +158,12 @@ export default function AppShell() {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-bg">
+      <AmbientBackground />
       <NavRail />
-      <main className={cn('relative min-w-0 flex-1', 'pb-14 md:pb-0')} id="main-content">
-        <Outlet />
+      <main className={cn('relative z-10 min-w-0 flex-1', 'pb-20 md:pb-0')} id="main-content">
+        <div key={location.pathname} className="h-full animate-fade-in">
+          <Outlet />
+        </div>
       </main>
       <MobileTabBar />
       <SystemStatus />

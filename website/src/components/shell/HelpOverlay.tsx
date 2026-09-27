@@ -23,7 +23,7 @@ export default function HelpOverlay() {
   return (
     <div className="fixed inset-0 z-[92] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[3px] animate-fade-in" onClick={() => setOpen(false)} />
-      <div className="relative w-full max-w-[430px] overflow-hidden rounded-xl border border-line-2 bg-surface-2/95 p-5 shadow-pop animate-rise-in">
+      <div className="glass-strong edge-lit relative w-full max-w-[440px] overflow-hidden rounded-2xl p-5 shadow-pop animate-scale-in">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="font-display text-[15px] font-semibold text-ink-1">Keyboard first</h2>

@@ -19,7 +19,7 @@ const COHORT_COLORS = { critical: 'var(--crit)', warning: 'var(--warn)', nominal
 
 function Card({ className, children, ...rest }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn('card card-hover relative flex flex-col overflow-hidden', className)} {...rest}>
+    <div className={cn('card card-hover edge-lit flex flex-col overflow-hidden', className)} {...rest}>
       {children}
     </div>
   )
@@ -27,7 +27,7 @@ function Card({ className, children, ...rest }: React.HTMLAttributes<HTMLDivElem
 
 function CardHead({ label, action }: { label: string; action?: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between px-4 pt-3.5">
+    <div className="flex items-center justify-between px-4 pt-4">
       <span className="panel-title">{label}</span>
       {action}
     </div>
@@ -100,17 +100,23 @@ export default function Overview() {
         <div className="grid auto-rows-auto grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-12">
           <Card className="col-span-1 md:col-span-2 lg:col-span-5 lg:row-span-2 animate-rise-in" style={{ animationDelay: '40ms' }}>
             <CardHead label="Fleet Health" action={<span className="font-mono text-[10px] text-ink-3">roll-40-cycle window</span>} />
-            <div className="flex flex-1 flex-col items-center justify-center px-4 pb-4 pt-1">
+            <div className="relative flex flex-1 flex-col items-center justify-center px-4 pb-4 pt-1">
+              {/* ambient bloom behind the gauge */}
+              <div
+                className="pointer-events-none absolute h-[240px] w-[240px] rounded-full blur-[60px]"
+                style={{ background: healthColor, opacity: 0.13 }}
+                aria-hidden
+              />
               <RadialScore value={s.health} size={188} stroke={11} color={healthColor}>
                 <span className="eyebrow">Composite index</span>
-                <span className="stat-num font-display text-[44px] font-bold leading-none tracking-tight" style={{ color: healthColor }}>
+                <span className="stat-num font-display text-[46px] font-bold leading-none tracking-tight" style={{ color: healthColor }}>
                   {Math.round(s.health)}<span className="text-[20px]">%</span>
                 </span>
-                <span className={cn('mt-1 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide', s.health >= 75 ? 'border-ok/30 bg-ok/10 text-ok' : 'border-warn/30 bg-warn/10 text-warn')}>
+                <span className={cn('mt-1.5 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide', s.health >= 75 ? 'border-ok/30 bg-ok/10 text-ok' : 'border-warn/30 bg-warn/10 text-warn')}>
                   {s.health >= 75 ? 'Nominal' : 'Degraded'}
                 </span>
               </RadialScore>
-              <div className="mt-3 flex w-full items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div className="mt-3 flex w-full items-center justify-between rounded-xl border border-line bg-surface-2/70 px-3.5 py-2.5 transition-colors hover:border-line-2">
                 <div>
                   <div className="flex items-center gap-1 text-[11px] font-medium text-ink-2">
                     {s.healthDelta >= 0 ? <TrendingUp size={12} className="text-ok" /> : <TrendingDown size={12} className="text-warn" />}
@@ -131,9 +137,9 @@ export default function Overview() {
                   ['Cycles ingested', s.totalCycles.toLocaleString()],
                   ['Units monitored', String(s.monitored)]
                 ].map(([k, v]) => (
-                  <div key={k} className="rounded-lg border border-line bg-surface-2 px-2.5 py-2">
+                  <div key={k} className="group rounded-xl border border-line bg-surface-2/60 px-2.5 py-2 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/25 hover:bg-surface-3/60">
                     <div className="eyebrow !tracking-[0.1em]">{k}</div>
-                    <div className="stat-num mt-0.5 text-[14px] font-semibold">{v}</div>
+                    <div className="stat-num mt-0.5 text-[14px] font-semibold text-ink-1 transition-colors group-hover:text-accent">{v}</div>
                   </div>
                 ))}
               </div>
@@ -179,20 +185,28 @@ export default function Overview() {
                 <button
                   key={e.id}
                   onClick={() => openExplorer(e.id)}
-                  className="group flex w-full items-center gap-3 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-left transition-all hover:border-line-2 hover:bg-surface-3"
+                  className="group relative flex w-full items-center gap-3 overflow-hidden rounded-xl border border-line bg-surface-2/50 px-3 py-2.5 text-left transition-all duration-300 ease-swift hover:-translate-y-px hover:border-line-2 hover:bg-surface-3/70 hover:shadow-card-hover"
                   style={{ animation: `rise-in 0.4s cubic-bezier(0.22,1,0.36,1) ${180 + i * 70}ms both` }}
                 >
-                  <span className="stat-num text-[13px] font-semibold text-ink-1">#{e.id}</span>
+                  <span
+                    className="absolute inset-y-0 left-0 w-[2px] opacity-70 transition-opacity group-hover:opacity-100"
+                    style={{ background: STATUS_META[e.status].color }}
+                    aria-hidden
+                  />
+                  <span className="stat-num pl-1.5 text-[13px] font-semibold text-ink-1">#{e.id}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[11px] text-ink-3">RUL {e.rul} · cycle {e.currentCycle}</span>
-                    <span className="mt-1 block h-1 overflow-hidden rounded-full bg-white/5">
-                      <span className="block h-full rounded-full" style={{ width: `${e.risk}%`, background: STATUS_META[e.status].color }} />
+                    <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-white/5">
+                      <span
+                        className="block h-full rounded-full transition-all duration-500"
+                        style={{ width: `${e.risk}%`, background: STATUS_META[e.status].color }}
+                      />
                     </span>
                   </span>
                   <span className="stat-num text-[12px] font-semibold" style={{ color: STATUS_META[e.status].color }}>
                     {e.risk}%
                   </span>
-                  <ChevronRight size={13} className="text-ink-3 transition-transform group-hover:translate-x-0.5" />
+                  <ChevronRight size={13} className="text-ink-3 transition-transform duration-300 group-hover:translate-x-0.5" />
                 </button>
               ))}
             </div>
@@ -274,20 +288,29 @@ export default function Overview() {
             </div>
           </Card>
 
-          <Card className="col-span-1 md:col-span-2 lg:col-span-7 animate-rise-in" style={{ animationDelay: '340ms' }}>
-            <div className="flex items-center justify-between px-4 pt-3.5">
-              <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-accent">
-                <Sparkles size={12} /> Model Insight
+          <Card
+            className="col-span-1 md:col-span-2 lg:col-span-7 animate-rise-in"
+            style={{
+              animationDelay: '340ms',
+              backgroundImage:
+                'linear-gradient(120deg, rgba(122,140,255,0.10) 0%, rgba(167,139,250,0.05) 42%, transparent 78%)'
+            }}
+          >
+            <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-accent/20 blur-[70px]" aria-hidden />
+            <div className="relative flex items-center justify-between px-4 pt-4">
+              <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-accent">
+                <Sparkles size={12} />
+                Model Insight
               </span>
               <span className="chip !text-[9px]">LSTM v2.4 · CONFIDENCE 87%</span>
             </div>
-            <div className="px-4 py-3">
+            <div className="relative px-4 pb-4 pt-3">
               <p className="max-w-[62ch] text-[12.5px] leading-relaxed text-ink-2">
                 Fleet-wide degradation is stable, but <span className="font-semibold text-ink-1">{s.criticalCount} engines</span> show compounding wear signatures.
                 Most relevant signals: <span className="text-ink-1">HPC Outlet Temp · Static Pressure · Fuel Ratio</span>. Three engines will cross the maintenance
-                threshold within 15 cycles — led by <button className="font-semibold text-accent underline-offset-2 hover:underline" onClick={() => openExplorer('071')}>Engine #071</button>.
+                threshold within 15 cycles — led by <button className="font-semibold text-accent underline-offset-2 transition-colors hover:text-violet hover:underline" onClick={() => openExplorer('071')}>Engine #071</button>.
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3.5 flex flex-wrap gap-2">
                 <button className="btn btn-primary h-8 text-[12px]" onClick={() => navigate('/telemetry')}>
                   Inspect signals
                 </button>

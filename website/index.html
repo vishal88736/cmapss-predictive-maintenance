@@ -4,8 +4,12 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#08090B" />
-    <meta name="description" content="AeroGuard AI — Aircraft engine intelligence. NASA C-MAPSS predictive-maintenance operations." />
+    <meta name="theme-color" content="#06070A" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="AeroGuard AI — Aircraft engine intelligence. NASA C-MAPSS predictive-maintenance operations."
+    />
     <title>AeroGuard AI — Aircraft Engine Intelligence</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,6 +17,22 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <style>
+      /* paint the shell background before React mounts — avoids a white flash */
+      html {
+        background: #06070a;
+        color-scheme: dark;
+      }
+      #root:empty::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(52vmax 52vmax at 12% 0%, rgba(122, 140, 255, 0.18), transparent 62%),
+          radial-gradient(46vmax 46vmax at 92% 12%, rgba(167, 139, 250, 0.14), transparent 64%),
+          #06070a;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

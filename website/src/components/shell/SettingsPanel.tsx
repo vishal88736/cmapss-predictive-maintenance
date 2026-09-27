@@ -30,9 +30,9 @@ export default function SettingsPanel() {
   if (!open) return null
   return (
     <div className="fixed inset-0 z-[93]" role="dialog" aria-modal="true" aria-label="Settings">
-      <div className="absolute inset-0 bg-black/45 animate-fade-in" onClick={() => setOpen(false)} />
-      <div className="absolute bottom-0 right-0 top-0 flex w-full max-w-[340px] flex-col border-l border-line-2 bg-surface-1/95 shadow-pop backdrop-blur-xl animate-slide-left">
-        <div className="flex items-center justify-between border-b border-line px-4 py-3.5">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] animate-fade-in" onClick={() => setOpen(false)} />
+      <div className="absolute bottom-0 right-0 top-0 flex w-full max-w-[348px] flex-col border-l border-line-2 bg-surface-1/92 shadow-pop backdrop-blur-2xl animate-slide-left">
+        <div className="flex items-center justify-between border-b border-line bg-surface-0/60 px-4 py-3.5">
           <h2 className="font-display text-[14px] font-semibold">Settings</h2>
           <button className="icon-btn" onClick={() => setOpen(false)} aria-label="Close settings">
             <X size={15} />
