@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "title": "Inspect project, available datasets/model artifacts, and existing app structure",
+      "status": "done"
+    },
+    {
+      "title": "Build research dashboard and real-data service interactions",
+      "status": "done"
+    },
+    {
+      "title": "Run checks and verify empty states and data integrity",
+      "status": "done"
+    }
+  ],
+  "updated_at": "2026-10-04T09:47:34.631Z",
+  "session_id": "01a10608-3d53-734c-abc1-b245a5355519"
+}

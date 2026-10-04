@@ -1,47 +1,43 @@
-import {
-  getEngines, getEngine, getTelemetry, getPrediction, getAlerts, getModels,
-  getModelMetrics, getFleetStats, cohortCurves, rulDistribution, getSnapshot,
-  simulate as simulateSync, anomaliesIn, sensorAt
-} from '@/data/db'
-import type { Engine, FleetStats } from '@/types/engine'
-import type { TelemetryBundle, TelemetrySnapshot, Anomaly } from '@/types/telemetry'
-import type { Prediction, SimulationResult, SimulationOverrides } from '@/types/prediction'
-import type { Alert } from '@/types/alert'
-import type { ModelInfo, ModelMetrics } from '@/types/model'
+import type { Dataset, Prediction, Subset } from '../types/domain'
 
-const later = <T>(value: () => T, ms = 120): Promise<T> =>
-  new Promise((resolve) => setTimeout(() => resolve(value()), ms * (0.6 + Math.random() * 0.8)))
+const cache = new Map<Subset, Promise<Dataset>>()
+const apiBase = import.meta.env.VITE_API_BASE_URL || '/api'
 
-export interface Api {
-  getFleet(): Promise<Engine[]>
-  getFleetStats(): Promise<FleetStats>
-  getEngine(id: string): Promise<Engine | undefined>
-  getTelemetry(id: string): Promise<TelemetryBundle | undefined>
-  getPrediction(id: string): Promise<Prediction | undefined>
-  getAlerts(): Promise<Alert[]>
-  getModels(): Promise<ModelInfo[]>
-  getModelMetrics(id: string): Promise<ModelMetrics | undefined>
-  getCohortCurves(): Promise<{ status: string; label: string; points: { x: number; y: number }[] }[]>
-  getRulDistribution(): Promise<{ bucket: string; count: number }[]>
-  getSnapshot(engineId: string, cycle: number): TelemetrySnapshot | null
-  getAnomalies(engineId: string, cycle: number, window: number): Anomaly[]
-  getSensorValue(engineId: string, sensorId: string, cycle: number): number | null
-  simulate(engineId: string, overrides: SimulationOverrides): Promise<SimulationResult | null>
+export function loadDataset(subset: Subset): Promise<Dataset> {
+  if (!cache.has(subset)) {
+    cache.set(subset, fetch(`${import.meta.env.BASE_URL}data/${subset}.json`)
+      .then(async response => {
+        if (!response.ok) throw new Error(`Dataset could not be loaded (${response.status}).`)
+        const data = await response.json() as Dataset
+        if (data.subset !== subset || data.split !== 'train' || !Array.isArray(data.engines) || !Array.isArray(data.sensorNames)) {
+          throw new Error('Unexpected dataset format.')
+        }
+        return data
+      }).catch(error => { cache.delete(subset); throw error }))
+  }
+  return cache.get(subset)!
 }
 
-export const api: Api = {
-  getFleet: () => later(getEngines, 180),
-  getFleetStats: () => later(getFleetStats, 100),
-  getEngine: (id) => later(() => getEngine(id), 90),
-  getTelemetry: (id) => later(() => getTelemetry(id), 220),
-  getPrediction: (id) => later(() => getPrediction(id), 160),
-  getAlerts: () => later(getAlerts, 140),
-  getModels: () => later(getModels, 100),
-  getModelMetrics: (id) => later(() => getModelMetrics(id), 200),
-  getCohortCurves: () => later(cohortCurves, 150),
-  getRulDistribution: () => later(rulDistribution, 130),
-  getSnapshot,
-  getAnomalies: anomaliesIn,
-  getSensorValue: sensorAt,
-  simulate: (engineId, overrides) => later(() => simulateSync(engineId, overrides), 600)
+export async function checkModelConnection(): Promise<boolean> {
+  try {
+    const response = await fetch(`${apiBase}/status`, { signal: AbortSignal.timeout(3500) })
+    if (!response.ok) return false
+    const status = await response.json()
+    return status.modelConnected === true
+  } catch { return false }
+}
+
+// A Python inference service can implement POST /api/predict with this request/response contract.
+// The frontend never substitutes a synthetic result if the service is absent or returns invalid data.
+export async function runPrediction(subset: Subset, engineId: number, cycle: number): Promise<Prediction> {
+  const response = await fetch(`${apiBase}/predict`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subset, split: 'train', engineId, cycle }),
+  })
+  if (!response.ok) throw new Error(`Inference request failed (${response.status}).`)
+  const result = await response.json() as Prediction
+  if (result.engineId !== engineId || result.cycle !== cycle || !Number.isFinite(result.predictedRUL)) {
+    throw new Error('Inference service returned an invalid prediction.')
+  }
+  return result
 }
