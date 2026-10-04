@@ -4,11 +4,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#09141e', foreground: '#e7f0f4', surface: '#0e1e2a',
-        border: '#29404f', primary: '#78cbdb', muted: '#839eac', warning: '#d8a56a'
+        background: 'var(--background)', foreground: 'var(--text)', surface: 'var(--surface)',
+        border: 'var(--border)', primary: 'var(--primary)', muted: 'var(--text-muted)', warning: 'var(--warning)'
       },
       fontFamily: {
-        display: ['Space Grotesk', 'sans-serif'],
+        display: ['Manrope', 'sans-serif'],
         mono: ['IBM Plex Mono', 'monospace']
       }
     }
