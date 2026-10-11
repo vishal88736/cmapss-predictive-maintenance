@@ -1,1 +1,1 @@
-"""Web adapter for the existing C-MAPSS project implementation."""
+"""GRACE-RUL website backend."""

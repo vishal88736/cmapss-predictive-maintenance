@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1240" viewBox="0 0 1400 1240" role="img" aria-labelledby="title description">
+  <title id="title">GRACE-RUL: corruption detection, sensor recovery, and remaining useful life prediction</title>
+  <desc id="description">Training constructs corrupted and reference sensor pairs. Deployment detects available and corrupted measurements, repairs them with a BiLSTM generator, combines CNN-GRU and Transformer features using quality information, and applies a bounded residual correction. The final SHAP and LIME stage explains the estimated fault score of flagged sensors and their separate influence on final remaining useful life. Reference targets and a Wasserstein critic are used only in training.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#485970"/></marker>
+    <marker id="trainingArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#99703c"/></marker>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; fill: #172b45; }
+      .heading { font-size: 34px; font-weight: 700; }
+      .subtitle { font-size: 19px; fill: #53657d; }
+      .label { font-size: 21px; font-weight: 700; }
+      .detail { font-size: 17px; fill: #425570; }
+      .small { font-size: 15px; fill: #596b81; }
+      .flow { fill: none; stroke: #485970; stroke-width: 2.5; marker-end: url(#arrow); }
+      .train-flow { fill: none; stroke: #99703c; stroke-width: 2.3; stroke-dasharray: 7 6; marker-end: url(#trainingArrow); }
+    </style>
+  </defs>
+  <rect width="1400" height="1240" fill="#f7f9fc"/>
+  <text x="54" y="60" class="heading">GRACE-RUL</text>
+  <text x="54" y="92" class="subtitle">Generative recovery and adaptive correction for engine remaining useful life</text>
+  <rect x="45" y="120" width="390" height="913" rx="18" fill="#fff9ed" stroke="#e8d8bb"/>
+  <text x="70" y="156" class="label">Training supervision</text>
+  <text x="70" y="182" class="small">Targets and critic are used during training.</text>
+  <rect x="70" y="214" width="340" height="102" rx="12" fill="white" stroke="#dfc694"/>
+  <text x="90" y="248" class="label">Reference trajectories</text>
+  <text x="90" y="275" class="detail">21 sensors + 3 operating settings</text>
+  <text x="90" y="298" class="small">Original data already include sensor noise.</text>
+  <path class="train-flow" d="M240 316 V348"/>
+  <rect x="70" y="351" width="340" height="120" rx="12" fill="white" stroke="#dfc694"/>
+  <text x="90" y="383" class="label">Synthetic corruption</text>
+  <text x="90" y="410" class="detail">Missing entries and sensor outages</text>
+  <text x="90" y="435" class="detail">Gaussian noise, bias, and drift</text>
+  <text x="90" y="456" class="small">Faults persist across overlapping windows.</text>
+  <path class="train-flow" d="M240 471 V503"/>
+  <rect x="70" y="506" width="340" height="92" rx="12" fill="white" stroke="#dfc694"/>
+  <text x="90" y="539" class="label">Corrupted / reference pairs</text>
+  <text x="90" y="567" class="detail">Damage mask supervises losses.</text>
+  <text x="90" y="589" class="small">It is not supplied to the deployed model.</text>
+  <rect x="70" y="644" width="340" height="115" rx="12" fill="white" stroke="#dfc694"/>
+  <text x="90" y="677" class="label">CNN-LSTM WGAN-GP critic</text>
+  <text x="90" y="705" class="detail">Reference versus repaired sequences</text>
+  <text x="90" y="732" class="detail">Encourages realistic sensor recovery</text>
+  <rect x="70" y="795" width="340" height="158" rx="12" fill="white" stroke="#dfc694"/>
+  <text x="90" y="829" class="label">Joint training objectives</text>
+  <text x="90" y="858" class="detail">Reconstruction + intact-value protection</text>
+  <text x="90" y="884" class="detail">Fault detection + adversarial realism</text>
+  <text x="90" y="910" class="detail">RUL accuracy + mild-fault consistency</text>
+  <text x="90" y="936" class="small">RUL labels enter objectives, not model inputs.</text>
+  <text x="70" y="992" class="small">Paper B supplies recovery and staged training.</text>
+  <rect x="490" y="120" width="865" height="1028" rx="18" fill="white" stroke="#d9e2ef"/>
+  <text x="515" y="156" class="label">Prediction pipeline</text>
+  <text x="515" y="182" class="small">At cycle t, every model input comes from measurements observed by t.</text>
+  <rect x="510" y="213" width="825" height="76" rx="12" fill="#edf3ff" stroke="#b7ccec"/>
+  <text x="533" y="244" class="label">Sensor history + operating settings</text>
+  <text x="533" y="271" class="detail">Training-fitted normalization; up to 70 past cycles; explicit padding mask</text>
+  <path class="flow" d="M923 289 V311"/>
+  <rect x="540" y="314" width="765" height="86" rx="12" fill="#e9f6f3" stroke="#9fcdc2"/>
+  <text x="563" y="347" class="label">Availability mask + learned finite-fault detector</text>
+  <text x="563" y="376" class="detail">Known missingness M; estimated bias, drift, and noise probabilities p</text>
+  <path class="flow" d="M923 400 V423"/>
+  <rect x="540" y="426" width="765" height="101" rx="12" fill="#e9f6f3" stroke="#9fcdc2"/>
+  <text x="563" y="459" class="label">BiLSTM generator + selective repair</text>
+  <text x="563" y="487" class="detail">r = (1 − M) + M p; repaired = (1 − r) observed + r generated</text>
+  <text x="563" y="512" class="small">Paper B; detector and weighted repair are proposed extensions.</text>
+  <path class="flow" d="M923 527 V546 H730 V563"/>
+  <path class="flow" d="M923 546 H1120 V563"/>
+  <rect x="535" y="566" width="390" height="103" rx="12" fill="#edf3ff" stroke="#b7ccec"/>
+  <text x="558" y="599" class="label">Local branch: CNN → GRU</text>
+  <text x="558" y="629" class="detail">Last 30 cycles; local degradation patterns</text>
+  <text x="558" y="654" class="small">Paper A; 64-dimensional feature vector</text>
+  <rect x="947" y="566" width="378" height="103" rx="12" fill="#f0edff" stroke="#c7bce9"/>
+  <text x="970" y="599" class="label">Global branch: Transformer</text>
+  <text x="970" y="629" class="detail">Up to 70 cycles; attention over history</text>
+  <text x="970" y="654" class="small">Paper C; 64-dimensional feature vector</text>
+  <path class="flow" d="M730 669 V685 H923 V698"/>
+  <path class="flow" style="marker-end: none;" d="M1120 669 V685 H923"/>
+  <rect x="540" y="701" width="765" height="83" rx="12" fill="#edf3ff" stroke="#b7ccec"/>
+  <text x="563" y="734" class="label">Quality gate + base RUL head</text>
+  <text x="563" y="762" class="detail">Fusion uses availability, repair weights, repair magnitude, and history length.</text>
+  <path class="flow" d="M923 784 V806"/>
+  <rect x="540" y="809" width="765" height="83" rx="12" fill="#f0edff" stroke="#c7bce9"/>
+  <text x="563" y="842" class="label">Bounded supervised residual correction</text>
+  <text x="563" y="870" class="detail">Paper C's correction principle; fit on engine-grouped out-of-fold predictions</text>
+  <path class="flow" d="M923 892 V914"/>
+  <rect x="540" y="917" width="765" height="90" rx="12" fill="#fff5e6" stroke="#dfc694"/>
+  <text x="563" y="949" class="label">Final SHAP + LIME fault and RUL explanations</text>
+  <text x="563" y="975" class="detail">Explain each flagged sensor's fault score and its separate RUL contribution.</text>
+  <text x="563" y="996" class="small">Paper A; fault flags come from the detector and availability mask.</text>
+  <path class="flow" d="M923 1007 V1029"/>
+  <rect x="540" y="1032" width="765" height="90" rx="12" fill="#172b45"/>
+  <text x="563" y="1065" style="fill: white; font-size: 22px; font-weight: 700;">RUL + uncertainty + suspected faulty sensors + evidence</text>
+  <text x="563" y="1095" style="fill: #c9d8ed; font-size: 17px;">Affected cycles, fault scores, repair plots, SHAP/LIME evidence, and local fidelity</text>
+  <path class="train-flow" d="M410 552 H468 V252 H507"/>
+  <path class="train-flow" d="M410 690 H485 V485 H537"/>
+  <text x="54" y="1186" class="detail">Finalized research design. Better accuracy and real-world readiness require matched experiments and operational validation.</text>
+  <text x="54" y="1214" class="small">Solid arrows: prediction data flow. Dashed arrows: training construction or feedback. Full specification: docs/FINAL_ARCHITECTURE.md</text>
+</svg>

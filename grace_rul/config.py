@@ -1,0 +1,40 @@
+"""Serializable configuration shared by the notebook and website."""
+
+FORMAT_VERSION = 3
+ARCHITECTURE = "detector-bilstm-wgan-gated-cnn-gru-transformer-residual-v3"
+SETTINGS = [f"setting_{i}" for i in range(1, 4)]
+SENSORS = [f"sensor_{i}" for i in range(1, 22)]
+FEATURE_COLUMNS = SETTINGS + SENSORS
+COLUMNS = ["unit", "cycle"] + FEATURE_COLUMNS
+SENSOR_NAMES = ["T2", "T24", "T30", "T50", "P2", "P15", "P30", "Nf", "Nc", "epr", "Ps30", "phi", "NRf", "NRc", "BPR", "farB", "htBleed", "Nf-dmd", "PCNfR-dmd", "W31", "W32"]
+SUBSETS = ["FD001", "FD002", "FD003", "FD004"]
+DEFAULT_CONFIG = {
+    "device": "cuda", "validation_fraction": 0.20,
+    "calibration_fraction_of_training": 0.10,
+    "subsets": SUBSETS, "sequence_length": 70, "local_length": 30,
+    "target_scale": 125.0, "train_rul_cap": 125.0, "generator_hidden": 64,
+    "generator_layers": 2, "cnn_channels": 32, "gru_hidden": 64,
+    "transformer_dim": 64, "transformer_heads": 4, "transformer_layers": 2,
+    "dropout": 0.2, "correction_bound": 15.0, "correction_penalty": 0.02,
+    "interval_alpha": 0.1, "mc_passes": 20, "batch_size": 128,
+    "predictor_epochs": 100, "generator_epochs": 50, "joint_epochs": 20,
+    "correction_epochs": 50, "patience": 15, "learning_rate": 0.001,
+    "repair_learning_rate": 0.0001, "joint_learning_rate": 0.0001,
+    "critic_steps": 1, "gradient_penalty": 10.0, "adversarial_warmup": 5,
+    "oof_folds": 3, "window_stride": 5, "clean_fraction": 0.25,
+    "seeds": [42, 123, 2026, 314, 777], "seed": 42, "quick_run": False,
+    "maximum_batches": None, "maximum_engines": None, "maximum_windows": None,
+    "background_size": 12, "explanation_samples": 128, "cpu_threads": 2,
+    "progress_interval_seconds": 30.0,
+}
+
+
+def quick_config(config):
+    """A visibly labeled execution check, never a scientific benchmark."""
+    return {**config, "quick_run": True, "subsets": ["FD001"], "seeds": [42],
+            "predictor_epochs": 1, "generator_epochs": 1, "joint_epochs": 1,
+            "correction_epochs": 2, "maximum_batches": 2, "maximum_engines": 18,
+            "maximum_windows": 48, "batch_size": 8, "generator_hidden": 16,
+            "cnn_channels": 8, "gru_hidden": 16, "transformer_dim": 32,
+            "adversarial_warmup": 0, "background_size": 3, "mc_passes": 4,
+            "explanation_samples": 64}

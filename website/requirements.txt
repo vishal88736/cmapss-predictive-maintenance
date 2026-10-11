@@ -1,0 +1,2 @@
+# Shared notebook, inference, and explanation dependencies.
+-r ../requirements.txt

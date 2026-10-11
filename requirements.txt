@@ -1,0 +1,19 @@
+# Training notebook, shared model, explanations, and website backend.
+# CPU/GPU wheels are platform-specific; install the desired PyTorch build first if needed.
+torch>=2.6,<3
+setuptools>=70,<82
+numpy>=2.0,<3
+pandas>=2.2,<4
+scikit-learn>=1.5,<2
+scipy>=1.13,<2
+matplotlib>=3.9,<4
+shap>=0.47,<1
+lime==0.2.0.1
+jupyterlab>=4.2,<5
+ipykernel>=6.29,<8
+nbformat>=5.10,<6
+nbclient>=0.10,<1
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+python-multipart>=0.0.18,<1
+httpx>=0.27,<1
