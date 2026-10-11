@@ -16,7 +16,7 @@ def pipeline_identity(train_frame, validation_frame, subset, config, seed):
         values = pd.util.hash_pandas_object(frame, index=False).values.tobytes()
         return hashlib.sha256(values + repr(list(frame.columns)).encode()).hexdigest()
 
-    return {"version": 1, "architecture": ARCHITECTURE, "subset": subset, "seed": int(seed),
+    return {"version": 2, "architecture": ARCHITECTURE, "subset": subset, "seed": int(seed),
             "config": {k: v for k, v in config.items() if k != "progress_interval_seconds"},
             "fit": fingerprint(train_frame), "validation": fingerprint(validation_frame)}
 

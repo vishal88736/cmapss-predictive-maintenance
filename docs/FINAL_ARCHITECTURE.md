@@ -2,7 +2,9 @@
 
 Generative Recovery and Adaptive Correction for Engine Remaining Useful Life
 
-Design finalized: 8 October 2026. Status: research specification, before implementation and experiments.
+Design finalized: 8 October 2026; training audit and revisions: 11 October 2026.
+Status: format-5 training, validation tuning, and matched comparator workflows implemented;
+small execution checks passed. Complete research benchmarks remain outstanding.
 
 User-requested addition: the final stage includes SHAP and LIME explanations of suspected sensor faults and their influence on predicted RUL.
 
@@ -141,7 +143,7 @@ At prediction cycle `t`, use at most the observed history `[t−69, ..., t]`. In
 
 Keep all 21 sensors initially, as in Paper A. Verify a 14-sensor alternative in a separate matched comparison, since Paper C uses a selected subset. A lack of temporal variation is not permission to discard a sensor before examining the operating conditions.
 
-Split by engine before fitting transformations or making windows. For FD001/FD003, use training-fitted per-channel Z-score normalization. For FD002/FD004, condition normalization on the six operating regimes inferred from the three settings, using centers and per-regime statistics fitted only on the fitting engines. Use a standard-deviation floor and a documented global fallback for sparse regimes. Regime-conditioned scaling is a proposed preprocessing adaptation to the multiple-condition problem described in all three papers.
+Split by engine before fitting transformations or making windows. For FD001/FD003, use training-fitted per-channel Z-score normalization. For FD002/FD004, condition normalization on the six operating regimes inferred from the three settings, using centers and per-regime statistics fitted only on the fitting engines. Floor each sensor's standard deviation at its smallest distinct fitting-data measurement increment (at least `1e-6`; entirely constant channels use `1`). This prevents nearly constant quantized measurements from becoming extreme standardized values. Sparse regimes fall back to global fitting sensor statistics. Regime-conditioned scaling is a proposed preprocessing adaptation to the multiple-condition problem described in all three papers.
 
 Apply artificial sensor faults on each reference trajectory, then make windows. Overlapping windows must share the same realized fault history. Bias/drift should not reset arbitrarily at every window boundary. Maintain a separate finite/available mask; zero filling is only a numerical placeholder.
 
@@ -177,7 +179,7 @@ Log the actual number of affected channels: rounding a percentage of 21 sensors 
 
 Maintain 25% unmodified training examples to protect reference-data behavior. For the remaining 75%, begin with individual mild faults, then introduce stronger faults and two-family combinations. Sample fault starts and durations independently of RUL labels in the main experiment. Include a separately labeled stress experiment where failures concentrate near end of life or affect the important thermodynamic sensors identified in Paper A.
 
-Validation and test corruption have saved, deterministic seeds. Test cases include 40% and 50% missingness, longer outages, larger noise/bias/drift, and combinations withheld from training. Reserve those cases for evaluating extrapolation; do not tune on their results.
+Validation and test corruption have saved, deterministic seeds. Full-mode test cases include 40% and 50% severity, longer outages, larger noise/bias/drift, and explicit two-family mixed faults. The mixed combinations are sampled from the same families used during training; they are not held-out fault combinations. A separate experiment withholding specific combinations remains proposed. Reserve extrapolation cases for evaluation; do not tune on their results. Damage labels mark entries actually changed by corruption, including missing values; a zero-valued channel unchanged by multiplicative drift is not labeled faulty.
 
 Do not corrupt RUL labels or operating settings in the primary sensor-recovery experiment. Missing settings are a separate unsupported-input condition until explicitly trained and tested.
 
@@ -189,11 +191,11 @@ Let `Y` be the corrupted normalized sensors, `O` the normalized operating settin
 
 Input: `[Y0, M, O]`, 45 features per timestep. Initial network: parallel temporal convolutions with kernels 3 and 5, 32 channels each, followed by a 64-unit GRU and a per-timestep 21-output sigmoid head. It returns estimated finite-fault probabilities `p`.
 
-Supervise `p` using `A` on available entries, with explicit clean examples. Known missingness is handled directly by `M`. The detector must learn that true engine degradation and operating-condition changes can be legitimate signals; its false-positive rate is a primary metric.
+Supervise `p` using `A` on available entries, with explicit clean examples. Per-channel positive BCE weights use square-root negative/positive counts bounded at 5. The sigmoid head starts at a conservative probability of approximately 0.018. Known missingness is handled directly by `M`. The detector must learn that true engine degradation and operating-condition changes can be legitimate signals; its false-positive rate is a primary metric.
 
 ### Sensor generator and selective repair
 
-Input: `[Y0, M, p, O]`, 66 features per timestep. Initial network: two-layer BiLSTM, 64 hidden units per direction; a `128 -> 64 -> 21` decoder produces candidate sensor values `G`.
+Input: `[Y0, M, p, O]`, 66 features per timestep. Initial network: two-layer BiLSTM, 64 hidden units per direction; a `128 -> 64 -> 21` residual decoder produces `G = Y0 + adjustment`. The decoder's final layer is initialized to zero, preserving finite readings initially and starting missing readings at the fitting-regime normalized mean. This residual parameterization is a project extension of Paper B.
 
 Define repair weights and repaired measurements:
 
@@ -233,16 +235,16 @@ Initial gate: `192 -> 32 -> 2`; base head: `128 -> 64 -> 1`. Nonnegative output 
 
 ### Bounded residual corrector
 
-Observable input: `[h, q, y_base, y_local, y_global]`, dimension 131. A `131 -> 32 -> 1` MLP returns:
+Observable input: `[q, y_base / 125, y_local / 125, y_global / 125]`, dimension 67. A `67 -> 32 -> 1` MLP returns:
 
 ```text
 delta = b * tanh(corrector_output)
 y_final = max(0, y_base + delta)
 ```
 
-Initial bound `b = 15` cycles; validation may choose from 5, 10, 15, and 30 cycles. Train with squared final RUL error plus a positive penalty on squared correction size, retaining Paper C's control-effort principle. Training targets may contain true RUL; model inputs never do. No correction-time reward or online label is needed at deployment.
+Initial bound `b = 15` cycles; full training searches 5, 10, 15, and 30 cycles on validation engines. The selected bound is a saved model buffer. Train with squared final RUL error plus a positive penalty on squared correction size, retaining Paper C's control-effort principle. Training targets may contain true RUL; model inputs never do. No correction-time reward or online label is needed at deployment.
 
-Fit the corrector on engine-grouped out-of-fold predictions from the fitting partition, so it learns errors on engines not used by the corresponding base model. Freeze the final base pipeline during correction fitting. An always-zero correction is a required comparator.
+Fit the corrector on engine-grouped out-of-fold predictions from the fitting partition, using both clean and mixed-corruption prefixes, so it learns errors on engines not used by the corresponding base model. Hidden fused features `h` are excluded: independently trained fold models can use different hidden coordinate systems, making their embeddings unsuitable as shared correction inputs. Freeze the final base pipeline during correction fitting. Include an always-zero correction as an epoch-zero candidate and retain it if all trained candidates worsen validation. Corrector checkpoints and the final seed use the same average of clean and mixed-corruption validation RMSE.
 
 ### Final SHAP and LIME sensor-fault explanation stage
 
@@ -277,6 +279,8 @@ High RUL importance alone is not evidence of a sensor fault. SHAP and LIME expla
 Sensor losses operate in normalized space. RUL and consistency losses use RUL divided by 125 so their scales are documented. Every loss excludes padding.
 
 - `L_rec`: mean squared repaired/reference sensor error on `A = 1`, divided by the number of altered entries.
+- `L_generator_rec`: direct generated/reference sensor error on altered entries, providing supervision even before finite-fault probabilities become reliable.
+- `L_trend`: error in consecutive repaired/reference sensor differences for valid pairs touching an altered entry; padding pairs are excluded.
 - `L_identity`: squared repaired/reference error on `A = 0`, protecting unaltered observations.
 - `L_detection`: binary cross-entropy for estimated finite faults, including clean controls.
 - `L_adv`: negative Wasserstein critic score on repaired sequences.
@@ -287,7 +291,8 @@ Sensor losses operate in normalized space. RUL and consistency losses use RUL di
 Initial joint generator/detector/predictor objective:
 
 ```text
-L = L_RUL + L_rec + 0.2 L_identity + 0.1 L_detection
+L = L_RUL + L_rec + 0.25 L_generator_rec + 0.5 L_identity
+    + 0.2 L_detection + 0.1 L_trend
     + 0.01 L_adv + 0.1 L_consistency + 0.1 L_branch
 ```
 
@@ -298,15 +303,19 @@ Strong consistency on nearly information-free inputs can teach plausible but uns
 Training sequence:
 
 1. **Predictor pretraining:** train the two branches, gate, and base head on reference data. AdamW, initial learning rate 0.001, dropout 0.2, early stopping on engine-disjoint validation. Maximum 100 epochs is an initial budget.
-2. **Repair pretraining:** freeze the predictor; train detector/generator on paired faults, then enable WGAN-GP. Initial learning rate 0.0001; maximum 50 epochs. Retain identity and reconstruction supervision throughout.
-3. **Joint optimization:** connect estimated detection, selective repair, and prediction. Train the whole pipeline with the joint objective and a smaller learning rate, initially for up to 20 epochs. Keep reference examples in every epoch.
+2. **Repair pretraining:** freeze the predictor and disable its dropout; train detector/generator on paired faults, then enable WGAN-GP. Initial learning rate 0.0001; maximum 50 epochs. Retain identity and reconstruction supervision throughout. WGAN-GP uses all batch members for its Wasserstein term and a uniformly sampled sub-batch of up to 16 for the expensive recurrent gradient penalty. The consistency reference pass disables dropout in all stages.
+3. **Joint optimization:** connect estimated detection, selective repair, and prediction. Train the whole pipeline with the joint objective and a smaller learning rate, initially for up to 20 epochs. Keep reference examples in every epoch. Retain the repair-stage checkpoint if every joint candidate worsens the same clean/mixed validation objective.
 4. **Correction fitting:** generate grouped out-of-fold fitting predictions and train the bounded corrector on those observable features and RUL targets. Keep validation and official test engines out of its fitting data.
 5. **Uncertainty assessment:** freeze parameters, then use separate calibration engines for empirical residual intervals and evaluate Monte Carlo dropout variability. No calibration labels become model inputs.
 6. **Fault and prediction explanations:** with the model frozen, configure SHAP backgrounds and LIME block perturbations using fitting data. Produce detector and RUL explanations for validation/test events without using test fault masks to construct the explanations.
 
 Split each official training subset into an 80% training pool and 20% validation by complete engine. Reserve 10% of that training pool for independent interval calibration, giving approximately 72% optimizer fitting, 8% calibration, and 20% validation overall, with integer-engine rounding. Calibration engines enter neither normalization nor any optimizer or checkpoint selection. Use three grouped folds within the fitting partition for correction features. Temporary fold models must fit preprocessing and every trainable upstream module using only their fold-training engines. Record their held-out detector/recovery/predictor metrics and mean/std summaries before fitting the final corrector; label these as upstream cross-validation rather than nested CV of the corrected pipeline. Fit the final base pipeline on the complete fitting partition with the selected configuration. Official test files remain separate throughout.
 
-Select checkpoints using a predeclared average of reference and in-distribution corrupted validation RUL errors, constrained by reconstruction and clean-data degradation limits. Never select checkpoints from official test metrics. Use five full training seeds for the main study. Batch size 128 is an initial setting and may change for memory availability.
+The implementation selects checkpoints using a predeclared average of reference and in-distribution mixed-corruption validation RUL errors. Repair candidates must also keep clean RMSE within 5% of the pretrained predictor, intact-entry normalized RMSE at most 0.15, and altered-entry reconstruction RMSE at most 1.5. If no repair candidate improves within those limits, the pretrained predictor is retained with repair bypassed. Correction selection separately protects clean RMSE and retains a zero-correction candidate. Final seeds are selected after correction with the same validation objective. Never select checkpoints from official test metrics. Use five full training seeds for the main study. Batch size 128 is an initial setting and may change for memory availability.
+
+Full mode defaults to stride-1 windows and balances engine sampling by reciprocal window counts. The split seed and validation corruption seed stay fixed across initialization seeds and comparator variants. Validation uses three prefixes per engine; OOF correction uses six. Calibration retains one endpoint per engine. Validation plateaus reduce learning rates by a factor of 0.5, with patience 5 and a floor of 1e-6; scheduler state is included in epoch checkpoints.
+
+Before final training, a small validation-only search compares loss weights, stride 1/5, and zero adversarial loss. It selects upstream settings without opening official test files, then fits OOF correction. Full runs separately train architectural adaptations of the three papers and module ablations, with paired seed/engine bootstrap comparisons. These share selected settings; they do not independently tune each baseline or reproduce Paper C's TD3. See [RESEARCH_TRAINING.md](RESEARCH_TRAINING.md) for the implemented protocol and remaining claim limitations.
 
 Train a separate model per subset in the primary paper comparison. A model jointly trained on all subsets is an additional experiment, not evidence of cross-subset transfer. A transfer claim requires holding out the target subset's engines during fitting and reporting the protocol explicitly.
 
@@ -373,4 +382,4 @@ Real-world readiness additionally requires evaluation on genuine operational his
 
 The finalized architecture is **estimated corruption detection -> selective BiLSTM/WGAN-GP recovery -> quality-gated CNN–GRU and Transformer prediction -> bounded supervised residual correction -> SHAP/LIME explanations of suspected sensor faults and RUL impact**.
 
-It addresses the requested corruption-and-recovery objective directly and gives every paper a concrete role. The comparison protocol establishes what would count as better performance. Implementation, measured superiority, and real operational validation remain subsequent work.
+It addresses the requested corruption-and-recovery objective directly and gives every paper a concrete role. Training and the matched architectural comparison workflow are implemented. Complete benchmark training, original-protocol paper reproductions, measured superiority, and real operational validation remain research work.

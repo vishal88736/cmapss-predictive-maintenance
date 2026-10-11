@@ -19,7 +19,7 @@ from grace_rul.artifacts import load_bundle, run_experiment
 from grace_rul.config import DEFAULT_CONFIG, quick_config
 from grace_rul.data import OperatingRegimeScaler, WindowDataset, corrupt_trajectory, load_subset, make_window, split_engines
 from grace_rul.model import GraceRUL, TemporalCritic, masked_rnn
-from grace_rul.training import critic_update, device_for, evaluate, fit_pipeline, interval_bounds, seed_all
+from grace_rul.training import critic_update, device_for, evaluate, fit_corrector, fit_pipeline, interval_bounds, objectives, seed_all
 from website.backend import app as web
 from website.backend.inference import InputError, parse_csv
 from website.backend.service import InferenceService
@@ -114,6 +114,18 @@ class PipelineInvariants(unittest.TestCase):
                 self.assertEqual(len(scaler.state["centers"]), 6 if subset in {"FD002", "FD004"} else 1)
                 self.assertTrue((regimes >= 0).all())
 
+    def test_near_constant_sensor_scaling_uses_fitting_resolution(self):
+        fit = self.train[self.train.unit == 1].head(100).copy()
+        fit["sensor_10"] = 1.30
+        fit.loc[fit.index[-1], "sensor_10"] = 1.31
+        scaler = OperatingRegimeScaler().fit(fit, "FD001", 42)
+        held = fit.iloc[:1].copy()
+        held["sensor_10"] = 1.31
+        normalized, _ = scaler.transform(held)
+        self.assertAlmostEqual(scaler.state["sensor_scale_floor"][9], .01)
+        self.assertLess(abs(float(normalized[0, 12])), 1.)
+        self.assertEqual(scaler.state["fit_units"], [1])
+
     def test_finite_bias_and_drift_do_not_become_missingness(self):
         reference = np.random.default_rng(8).normal(size=(120, 24)).astype(np.float32)
         for family in ["bias", "drift", "noise"]:
@@ -124,6 +136,107 @@ class PipelineInvariants(unittest.TestCase):
             self.assertTrue(np.array_equal(x[:, 3:][~altered], reference[:, 3:][~altered]))
         x, altered = corrupt_trajectory(reference, np.random.default_rng(42), "outage", .3)
         self.assertTrue(np.array_equal(np.isnan(x[:, 3:]), altered))
+
+    def test_drift_labels_only_measurements_that_actually_change(self):
+        reference = np.zeros((100, 24), dtype=np.float32)
+        reference[:, 3::2] = 1.
+        damaged, altered = corrupt_trajectory(reference, np.random.default_rng(42), "drift", .5)
+        self.assertTrue(altered.any())
+        np.testing.assert_array_equal(altered, damaged[:, 3:] != reference[:, 3:])
+        self.assertFalse(altered[:, 1::2].any())
+
+    def test_explicit_mixed_fault_evaluation_is_reproducible(self):
+        reference = np.random.default_rng(8).normal(size=(120, 24)).astype(np.float32)
+        first, labels = corrupt_trajectory(reference, np.random.default_rng(42), "mixed", .4)
+        repeated, repeated_labels = corrupt_trajectory(reference, np.random.default_rng(42), "mixed", .4)
+        np.testing.assert_array_equal(first, repeated)
+        np.testing.assert_array_equal(labels, repeated_labels)
+        np.testing.assert_array_equal(labels, first[:, 3:] != reference[:, 3:])
+        self.assertTrue(labels.any())
+        np.testing.assert_array_equal(first[:, :3], reference[:, :3])
+
+    def test_consistency_teacher_disables_dropout_and_restores_modes(self):
+        model = GraceRUL(self.config).train()
+        valid = torch.ones(2, 70, dtype=torch.bool)
+        batch = {"x": torch.randn(2, 70, 24), "valid": valid,
+                 "altered": torch.zeros(2, 70, 21, dtype=torch.bool), "target": torch.ones(2) * 70}
+        batch["reference"] = batch["x"].clone()
+        calls = []
+
+        def record_mode(module, inputs, output):
+            calls.append((module.training, module.head[2].training, output["base"].detach().clone()))
+
+        hook = model.predictor.register_forward_hook(record_mode)
+        try:
+            loss, _ = objectives(model, batch)
+            loss.backward()
+            objectives(model, batch)
+        finally:
+            hook.remove()
+        self.assertTrue(calls[0][0] and calls[0][1])
+        self.assertFalse(calls[1][0] or calls[1][1])
+        torch.testing.assert_close(calls[1][2], calls[3][2], rtol=0, atol=0)
+        self.assertTrue(all(module.training for module in model.modules()))
+
+    def test_corrector_ignores_fold_specific_hidden_coordinates(self):
+        model = GraceRUL(self.config).eval()
+        torch.nn.init.normal_(model.corrector[-1].weight)
+        x = torch.randn(2, 70, 24)
+        valid = torch.ones(2, 70, dtype=torch.bool)
+        with torch.no_grad():
+            before = model(x, valid)
+
+        def permute_hidden_coordinates(module, inputs, output):
+            return {**output, "features": output["features"].flip(-1)}
+
+        hook = model.predictor.register_forward_hook(permute_hidden_coordinates)
+        try:
+            with torch.no_grad():
+                after = model(x, valid)
+        finally:
+            hook.remove()
+        self.assertFalse(torch.equal(before["features"], after["features"]))
+        torch.testing.assert_close(before["prediction"], after["prediction"], rtol=0, atol=0)
+
+    def test_corrector_retains_zero_candidate_when_validation_worsens(self):
+        fit, val = self.train[self.train.unit <= 9], self.train[self.train.unit.isin([10, 11])]
+        model = GraceRUL(self.config).eval()
+        model.scaler = OperatingRegimeScaler().fit(fit, "FD001", 42)
+
+        def untrained_fold(train, validation, subset, config, seed, **options):
+            return GraceRUL(config).eval(), OperatingRegimeScaler().fit(train, subset, seed), pd.DataFrame(), 0.
+
+        scores = [(5., {"RMSE": 4.}, {"RMSE": 6.}), (10., {"RMSE": 9.}, {"RMSE": 11.}),
+                  (9., {"RMSE": 8.}, {"RMSE": 10.})]
+        with patch("grace_rul.training.fit_pipeline", side_effect=untrained_fold), \
+                patch("grace_rul.training.validation_score", side_effect=scores), contextlib.redirect_stdout(io.StringIO()):
+            history, _, _ = fit_corrector(model, fit, val, "FD001", self.config, 42)
+        self.assertEqual(history.validation_macro_RMSE.min(), 5.)
+        self.assertTrue(bool((model.corrector[-1].weight == 0).all()))
+        self.assertTrue(bool((model.corrector[-1].bias == 0).all()))
+
+    def test_invalid_epoch_budget_fails_before_creating_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "invalid"
+            with self.assertRaisesRegex(ValueError, "joint_epochs"):
+                run_experiment(ROOT, {**self.config, "joint_epochs": 0}, output)
+            self.assertFalse(output.exists())
+
+    def test_joint_stage_keeps_repair_checkpoint_if_all_updates_worsen(self):
+        config = {**self.config, "maximum_batches": 1, "adversarial_warmup": 10}
+        fit, val = self.train[self.train.unit <= 6], self.train[self.train.unit.isin([7, 8])]
+        snapshots = []
+
+        def validation(model, *args, **options):
+            snapshots.append({name: weights.clone() for name, weights in model.state_dict().items()})
+            score = [5., 4., 6.][len(snapshots) - 1]
+            return score, {"RMSE": score}, {"RMSE": score, "reconstruction_RMSE": 1.}
+
+        with patch("grace_rul.training.validation_score", side_effect=validation):
+            model, _, _, score = fit_pipeline(fit, val, "FD001", config, 42, verbose=False)
+        self.assertEqual(score, 4.)
+        for name, weights in model.state_dict().items():
+            torch.testing.assert_close(weights, snapshots[1][name], rtol=0, atol=0)
 
     def test_windows_exclude_future_and_padding_is_ignored(self):
         values = np.random.default_rng(7).normal(size=(100, 24)).astype(np.float32)
@@ -171,6 +284,20 @@ class PipelineInvariants(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "critic failed"):
                 critic_update(critic, optimizer, result, batch, self.config)
         self.assertEqual((torch.backends.cudnn.enabled, torch.backends.mkldnn.enabled), backend_flags)
+
+    def test_gradient_penalty_sub_batch_preserves_full_wasserstein_batch(self):
+        critic = TemporalCritic(self.config)
+        batch = {"reference": torch.randn(4, 12, 24), "valid": torch.ones(4, 12, dtype=torch.bool)}
+        result = {"repaired": torch.randn(4, 12, 21)}
+        sizes = []
+        hook = critic.register_forward_pre_hook(lambda module, inputs: sizes.append(len(inputs[0])))
+        try:
+            loss = critic_update(critic, torch.optim.Adam(critic.parameters()), result, batch,
+                                 {**self.config, "gradient_penalty_batch_size": 2})
+        finally:
+            hook.remove()
+        self.assertTrue(np.isfinite(loss))
+        self.assertEqual(sizes, [2, 4, 4])
 
     def test_vectorized_rnn_preserves_ragged_outputs_and_gradients(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
@@ -318,6 +445,9 @@ class UploadAndAPI(unittest.TestCase):
             self.assertEqual(set(tables["cross_validation_metrics"].fold), {1, 2, 3})
             self.assertTrue((tables["cross_validation_summary"].folds == 3).all())
             self.assertTrue(np.isfinite(tables["cross_validation_summary"].RMSE_mean).all())
+            correction_score = tables["correction_history"].validation_macro_RMSE.min()
+            self.assertEqual(tables["seed_summary"].iloc[0].validation_selection_RMSE, correction_score)
+            self.assertLessEqual(correction_score, tables["seed_summary"].iloc[0].validation_no_correction_RMSE)
             for fold in entry["oof_audit"]:
                 self.assertFalse(set(fold["held_out_units"]) & set(fold["fit_units"] + fold["inner_validation_units"]))
             with patch.dict(os.environ, {"GRACE_MODEL_PATH": "", "GRACE_ARTIFACTS_DIR": directory}):

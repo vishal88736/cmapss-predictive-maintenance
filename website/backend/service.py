@@ -99,6 +99,9 @@ class InferenceService:
                 "model_name": "GRACE-RUL", "format_version": FORMAT_VERSION, "bundle_name": self.path.parent.name if self.path else None,
                 "mode": "quick" if quick else "trained" if ready else "pending", "device": str(self.device),
                 "config": self.config, "supported_subsets": list(self.loaded) if ready else self.config["subsets"], "parameters": parameters,
+                "selected_correction_bounds": {s: float(e["model"].correction_bound) for s, e in self.loaded.items()},
+                "selected_repair": {s: bool(e["model"].repair_enabled) for s, e in self.loaded.items()},
+                "selected_adversarial_weights": {s: e["model"].config["adversarial_loss_weight"] for s, e in self.loaded.items()},
                 "interval_confidence": 100 * (1 - self.config["interval_alpha"]), "interval_method": "empirical calibration residual quantiles",
                 "explanations_available": bool(importlib.util.find_spec("shap") and importlib.util.find_spec("lime")),
                 "placeholder": {"notebook": "GRACE_RUL_all_subsets.ipynb", "artifact": "artifacts/<run>/grace_rul_ALL.pt", "manifest": "models/model_manifest.json"}}
@@ -108,7 +111,7 @@ class InferenceService:
         with self.lock:
             root = self.path.parent if self.bundle else None
             tables = {}
-            for name in ["test_metrics", "training_history", "correction_history", "robustness_summary", "ablation_metrics", "seed_summary", "cross_validation_metrics", "cross_validation_summary"]:
+            for name in ["test_metrics", "training_history", "correction_history", "robustness_summary", "ablation_metrics", "seed_summary", "cross_validation_metrics", "cross_validation_summary", "test_seed_summary", "validation_search", "benchmark_summary", "benchmark_comparison", "superiority_checks", "benchmark_training_audit"]:
                 try:
                     path = root / f"{name}.csv" if root else None
                     tables[name] = pd.read_csv(path).replace([np.inf, -np.inf], np.nan).to_dict("records") if path and path.is_file() else []
@@ -177,6 +180,7 @@ class InferenceService:
                     finally:
                         model.eval()
                 engines.append({"id": f"{subset}:{unit}", "subset": subset, "unit": int(unit), "last_cycle": int(group.iloc[-1].cycle), "observations": len(group),
+                    "recovery_enabled": bool(model.repair_enabled),
                     "predicted_rul": float(prediction[-1]), "base_rul": float(out["base"][-1]), "correction_cycles": float(out["delta"][-1]),
                     "interval_lower": float(lo[-1]), "interval_upper": float(hi[-1]), "interval_width": float(hi[-1] - lo[-1]),
                     "interval_scope": entry["calibration"]["scope"], "mc_std_cycles": mc_std,
@@ -220,7 +224,11 @@ class InferenceService:
                 target = sensor - 1
                 if not np.isfinite(x[valid, 3 + target]).any():
                     raise InputError("This sensor is entirely missing. Its outage is directly observable; choose an available sensor for finite-fault explanations.")
+            recovery_enabled = bool(item["model"].repair_enabled)
+            if not recovery_enabled:
+                target = None
             result = explain_window(item["model"], x, valid, item["entry"]["background"], item["entry"]["background_valid"],
                                     target_sensor=target, samples=self.config["explanation_samples"], seed=self.config["seed"])
             return clean_json({**result, "engine": f"{subset}:{unit}", "model_bundle": self.path.parent.name,
-                               "note": "SHAP and LIME explain estimated fault scores and RUL. Sensor importance alone does not confirm a fault."})
+                               "note": "SHAP and LIME explain estimated fault scores and RUL. Sensor importance alone does not confirm a fault." if recovery_enabled else
+                                       "Repair is bypassed. SHAP and LIME explain final RUL only; trained finite-fault detection is unavailable."})

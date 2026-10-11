@@ -1,5 +1,5 @@
 # Training notebook, shared model, explanations, and website backend.
-# CPU/GPU wheels are platform-specific; install the desired PyTorch build first if needed.
+# setup_env.sh installs the CUDA build first; --cpu explicitly installs the CPU build.
 torch>=2.6,<3
 setuptools>=70,<82
 numpy>=2.0,<3

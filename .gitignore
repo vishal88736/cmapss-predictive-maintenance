@@ -61,3 +61,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Generated training runs, checkpoints, notebook validation, and plot caches
+/artifacts/

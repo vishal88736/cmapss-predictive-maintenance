@@ -31,6 +31,18 @@ def load_subset(data_dir, subset):
     return train, test, dict(zip(sorted(test.unit.unique()), truth.tolist()))
 
 
+def load_training_subset(data_dir, subset):
+    """Hyperparameter search has no reason to open official test inputs/labels."""
+    frame = pd.read_csv(Path(data_dir) / f"train_{subset}.txt", sep=r"\s+", header=None).dropna(axis=1, how="all")
+    if frame.shape[1] != len(COLUMNS):
+        raise ValueError(f"{subset}: expected 26 trajectory columns.")
+    frame.columns = COLUMNS
+    frame[["unit", "cycle"]] = frame[["unit", "cycle"]].astype(int)
+    if frame.duplicated(["unit", "cycle"]).any() or not np.isfinite(frame.to_numpy()).all():
+        raise ValueError("Training trajectories must have unique cycles and finite references.")
+    return frame.sort_values(["unit", "cycle"]).reset_index(drop=True)
+
+
 def source_hashes(data_dir, subset):
     return {name: hashlib.sha256((Path(data_dir) / name).read_bytes()).hexdigest()
             for name in [f"train_{subset}.txt", f"test_{subset}.txt", f"RUL_{subset}.txt"]}
@@ -73,14 +85,23 @@ class OperatingRegimeScaler:
         centers = KMeans(k, n_init=10, random_state=seed).fit(normalized).cluster_centers_ if k > 1 else normalized.mean(0, keepdims=True)
         regimes = ((normalized[:, None] - centers[None]) ** 2).sum(-1).argmin(1)
         sensors = frame[SENSORS].to_numpy(float)
+        # Quantized, almost-constant regime channels otherwise turn one normal
+        # measurement increment into tens of standard deviations (e.g. FD002
+        # sensor_10). Estimate a per-channel floor from fitting observations only.
+        floors = []
+        for column in sensors.T:
+            increments = np.diff(np.unique(column))
+            floors.append(max(1e-6, float(increments.min())) if len(increments) else 1.)
+        floors = np.asarray(floors)
         means, stds = [], []
         for r in range(k):
             rows = sensors[regimes == r]
             if len(rows) < 10:
                 rows = sensors
-            means.append(rows.mean(0)); stds.append(np.maximum(rows.std(0), 1e-6))
+            means.append(rows.mean(0)); stds.append(np.maximum(rows.std(0), floors))
         self.state = {"setting_mean": sm.tolist(), "setting_std": ss.tolist(), "centers": centers.tolist(),
                       "sensor_mean": np.asarray(means).tolist(), "sensor_std": np.asarray(stds).tolist(),
+                      "sensor_scale_floor": floors.tolist(),
                       "fit_units": sorted(int(i) for i in frame.unit.unique())}
         return self
 
@@ -99,7 +120,10 @@ def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=
     altered = np.zeros(x[:, 3:].shape, dtype=bool)
     if family == "clean" or (family is None and rng.random() < clean_fraction):
         return x, altered
-    families = [family] if family else rng.choice(FAULTS, size=2 if progress > .4 and rng.random() < .6 else 1, replace=False).tolist()
+    if family == "mixed":
+        families = rng.choice(FAULTS, size=2, replace=False).tolist()
+    else:
+        families = [family] if family else rng.choice(FAULTS, size=2 if progress > .4 and rng.random() < .6 else 1, replace=False).tolist()
     severity = float(severity if family else rng.choice([.1, .2, .3]) * max(.3, progress))
     n, c = altered.shape
     for fault in families:
@@ -126,6 +150,10 @@ def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=
             x[start:, 3 + channels] *= 1 + ramp * slopes; altered[start:, channels] = True
         else:
             raise ValueError(f"Unknown fault family: {fault}")
+    # Multiplicative drift cannot alter an exactly zero standardized reading,
+    # and its first ramp point is unchanged. Do not teach the detector to flag
+    # measurements that remain identical to their reference.
+    altered = x[:, 3:] != reference[:, 3:]
     return x, altered
 
 
@@ -154,8 +182,12 @@ class WindowDataset(Dataset):
             elif mode == "test":
                 ends = [len(values) - 1]
             else:
-                count = 3 if mode == "correction" else 1
-                ends = np.unique(rng.integers(min(19, len(values) - 1), len(values), count))
+                count = config["correction_prefixes"] if mode == "correction" else config["validation_prefixes"] if mode == "validation" else 1
+                # A seed per engine keeps endpoints stable across model variants,
+                # even when a fold contains a different list of engines.
+                endpoint_rng = np.random.default_rng(np.random.SeedSequence([seed, int(unit), 991]))
+                available = np.arange(min(19, len(values) - 1), len(values))
+                ends = np.sort(endpoint_rng.choice(available, min(count, len(available)), replace=False))
             self.samples.extend((engine_index, int(end)) for end in ends)
         if mode == "train" and config.get("maximum_windows") and len(self.samples) > config["maximum_windows"]:
             self.samples = [self.samples[i] for i in sorted(rng.choice(len(self.samples), config["maximum_windows"], replace=False))]

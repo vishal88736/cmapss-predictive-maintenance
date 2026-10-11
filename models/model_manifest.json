@@ -1,10 +1,10 @@
 {
   "model_name": "GRACE-RUL",
-  "format_version": 3,
+  "format_version": 5,
   "state": "awaiting_training",
   "notebook": "GRACE_RUL_all_subsets.ipynb",
   "expected_artifact": "artifacts/<run>/grace_rul_ALL.pt",
   "override_environment_variable": "GRACE_MODEL_PATH",
-  "architecture": "detector-bilstm-wgan-gated-cnn-gru-transformer-residual-v3",
+  "architecture": "detector-residual-bilstm-wgan-gated-cnn-gru-transformer-residual-v5",
   "description": "Model placeholder. The training notebook writes real weights, preprocessing, correction, calibration, and explanation backgrounds."
 }

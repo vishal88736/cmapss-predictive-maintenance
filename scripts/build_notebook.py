@@ -25,7 +25,8 @@ It uses the `grace_rul/` package so the website loads exactly the same model def
 Keep this notebook, that package, and `data/` together. Install `requirements.txt` or run
 `bash scripts/setup_env.sh`, then choose the **Python (GRACE-RUL)** kernel.
 
-The default `QUICK_RUN = False` trains all four subsets with five seeds using CUDA.
+The default `QUICK_RUN = False` tunes on validation data, trains all four subsets
+with five seeds, and trains matched architecture comparators and ablations using CUDA.
 PyTorch must detect an accessible GPU; a CUDA request never silently falls back to CPU.
 Set it to `True` only for a small FD001 execution check. Quick artifacts are clearly
 labeled and are not benchmark evidence. A full run has a substantial compute cost.
@@ -62,11 +63,17 @@ md("""
 
 The full configuration uses a 70-cycle global window, 30-cycle local branch, 21 sensors,
 three settings, a two-layer BiLSTM generator, and two Transformer layers with four heads.
+The residual generator starts by preserving observed values. Direct reconstruction,
+temporal-trend supervision, and intact-entry identity losses train recovery. Full mode
+uses stride-1 windows and balances sampling by engine. Learning-rate reduction and
+clean/intact/reconstruction checkpoint limits are configurable.
 Corruption labels supervise detection/recovery only; they are never inference features.
 The critic is training-only. Training targets are capped at 125; evaluation reports capped
 and original official targets separately. Empirical intervals are not conformal guarantees.
 
-Full runs train separate models for each subset. Seeds are selected using validation
+Partition and corruption seeds are fixed across training seeds. Validation samples
+three prefixes per engine; correction uses six; calibration retains one independent
+endpoint per engine. Full runs train separate models for each subset. Seeds are selected using validation
 performance, never test scores. Training explicitly requests `CONFIG['device'] = 'cuda'`.
 Use `nvidia-smi` and the GPU check in README.md before starting. An intentional CPU
 execution check requires changing the device to `'cpu'`.
@@ -112,7 +119,7 @@ code("""
 inventory = []
 for subset in CONFIG['subsets']:
     train, test, truths = load_subset(PROJECT_ROOT / 'data', subset)
-    partition = split_engines(train, CONFIG['seed'], CONFIG['maximum_engines'],
+    partition = split_engines(train, CONFIG['split_seed'], CONFIG['maximum_engines'],
                               CONFIG['validation_fraction'], CONFIG['calibration_fraction_of_training'])
     inventory.append({'subset': subset, 'train_engines': train.unit.nunique(), 'test_engines': test.unit.nunique(),
                       'train_rows': len(train), 'test_rows': len(test),
@@ -134,10 +141,10 @@ Unmodified examples remain in training. The damage mask is a target, not a model
 code("""
 subset = CONFIG['subsets'][0]
 train, test, truths = load_subset(PROJECT_ROOT / 'data', subset)
-partition = split_engines(train, CONFIG['seed'], CONFIG['maximum_engines'],
+partition = split_engines(train, CONFIG['split_seed'], CONFIG['maximum_engines'],
                           CONFIG['validation_fraction'], CONFIG['calibration_fraction_of_training'])
 fit = train[train.unit.isin(partition['fit'])]
-scaler = OperatingRegimeScaler().fit(fit, subset, CONFIG['seed'])
+scaler = OperatingRegimeScaler().fit(fit, subset, CONFIG['split_seed'])
 demo = WindowDataset(fit, scaler, CONFIG, mode='correction', family='bias', seed=42)[0]
 affected = np.flatnonzero(demo['altered'].any(0).numpy())
 j = int(affected[0]) if len(affected) else 2
@@ -151,19 +158,28 @@ plt.xlabel('Observed window position'); plt.ylabel('Normalized reading'); plt.le
 md("""
 ## Train and export the complete pipeline
 
-`run_experiment` performs predictor pretraining, detector/generator and WGAN-GP training,
+`run_experiment` first searches loss weights and stride on fitting/validation engines
+without opening official test files. It then performs predictor pretraining, detector/generator and WGAN-GP training,
 joint recovery/RUL optimization, three-fold engine-disjoint correction fitting, validation
 fault-threshold selection, and separate empirical interval calibration. Temporary OOF
 models also use independent inner validation engines. The exported audit records these
 partitions. No training or calibration stage fits on the official test engines.
 
 Progress includes batch counts, validation, and each temporary OOF model's epochs.
-WGAN-GP epochs are slower once the critic starts after warmup. Completed upstream
+WGAN-GP uses up to 16 randomly sampled examples for gradient penalty and the full
+batch for Wasserstein loss. Repair must improve the clean/corrupted validation
+objective within clean-RMSE, intact-repair, and reconstruction limits; otherwise
+the pretrained predictor is retained with repair bypassed. Joint training can retain
+the selected repair checkpoint. Correction uses observable summaries and predictions
+across folds, searches bounds of 5/10/15/30 cycles, and retains a zero-correction fallback.
+Final seeds are selected after
+correction using clean/mixed validation RMSE. Completed upstream
 epochs (including OOF models) are saved in the printed run directory's `checkpoints/`.
 To resume after interrupting, restart the kernel and rerun setup/configuration with
 the same settings, then pass that run directory as `output_dir` to `run_experiment`.
 Completed upstream models load from checkpoints; correction and evaluation rerun.
-Older runs containing only CSV results cannot restore their previous weights.
+Older format-3/4 runs are incompatible with the residual-recovery format-5 pipeline and
+require fresh training. The interrupted October 8 artifacts have been removed.
 
 Three-fold metrics evaluate the detector/recovery/predictor on held-out fitting engines
 before the final corrector learns from their out-of-fold targets. Fold-level records
@@ -171,9 +187,13 @@ and mean/std summaries are saved. They are explicitly upstream CV; the complete
 corrected pipeline is evaluated separately on official test files.
 
 It then evaluates clean and corrupted endpoint predictions, unseen severities in full mode,
-five seeds, and inference-intervention ablations. Those ablations are labeled accordingly;
-retrained paper baselines and retrained module ablations are additional research experiments,
-not results manufactured by this notebook.
+five seeds, and inference-intervention ablations. Full mode also separately trains
+CNN–GRU, repair/CNN–LSTM, and Transformer/correction adaptations plus retrained
+GRACE ablations. Identical test engines and corruptions support paired seed/engine
+bootstrap comparisons. The Transformer comparator uses supervised residual correction,
+not the original TD3. These are harmonized adaptations, not reproductions of published
+paper scores. Quick notebook mode skips tuning/comparators; `scripts/train_research.py
+--quick --device cpu` checks that additional workflow. See `docs/RESEARCH_TRAINING.md`.
 """)
 code("""
 BUNDLE_PATH, TABLES = run_experiment(PROJECT_ROOT, CONFIG)
@@ -203,11 +223,15 @@ display(TABLES['cross_validation_metrics'])
 display(TABLES['cross_validation_summary'])
 display(TABLES['robustness_summary'])
 display(TABLES['ablation_metrics'])
+for name in ['validation_search', 'test_seed_summary', 'benchmark_summary', 'superiority_checks']:
+    if name in TABLES:
+        display(Markdown(f'**{name}**'))
+        display(TABLES[name])
 """)
 md("""
 ## Reload the exact website artifact and inspect recovery
 
-The format-3 bundle contains weights, per-subset scalers, correction, sensor thresholds,
+The format-5 bundle contains weights, selected per-subset settings, repair/bound buffers, correction, sensor thresholds,
 empirical interval offsets, fitting-only explanation backgrounds, source hashes, and
 engine split audits. It can be loaded with `weights_only=True`. Legacy artifacts are
 rejected because their architecture differs.
@@ -237,6 +261,7 @@ plt.plot(out['repaired'][0, valid, suspect], label='Recovered')
 plt.title(f'Estimated sensor recovery: {SENSORS[suspect]} ({SENSOR_NAMES[suspect]})')
 plt.legend(); plt.tight_layout(); plt.savefig(RUN_DIR / 'sensor_recovery.png', dpi=150); plt.show()
 print('Final RUL:', float(out['prediction'][0]), 'cycles; correction:', float(out['delta'][0]))
+print('Learned repair selected:', bool(entry['model'].repair_enabled), '| Correction bound:', float(entry['model'].correction_bound))
 """)
 md("""
 ## Final SHAP and LIME sensor-fault explanations
@@ -254,7 +279,7 @@ Detailed website explanations are computed on demand after an engine is selected
 code("""
 explanation = explain_window(entry['model'], sample['x'], sample['valid'],
                              entry['entry']['background'], entry['entry']['background_valid'],
-                             target_sensor=suspect, samples=CONFIG['explanation_samples'],
+                             target_sensor=suspect if bool(entry['model'].repair_enabled) else None, samples=CONFIG['explanation_samples'],
                              seed=CONFIG['seed'], time_blocks=1 if QUICK_RUN else 3)
 (RUN_DIR / f'explanation_{subset}.json').write_text(json.dumps(explanation, indent=2))
 fig, axes = plt.subplots(1, 2, figsize=(13, 5))

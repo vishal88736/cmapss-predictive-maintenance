@@ -24,7 +24,7 @@ The visible model placeholder remains until full training finishes. Upload previ
 and sample downloads work without weights; inference and explanations return a
 clear model-unavailable response. The website never trains inside a web request.
 
-Run the notebook with `QUICK_RUN = False`. Full format-3 bundles under
+Run the notebook with `QUICK_RUN = False`. Full format-5 bundles under
 `artifacts/<run>/grace_rul_ALL.pt` are discovered automatically, with their
 `run_manifest.json`. Refresh the model status to load the newest run.
 
