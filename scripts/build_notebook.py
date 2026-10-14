@@ -151,7 +151,9 @@ partition = split_engines(train, CONFIG['split_seed'], CONFIG['maximum_engines']
                           CONFIG['validation_fraction'], CONFIG['calibration_fraction_of_training'])
 fit = train[train.unit.isin(partition['fit'])]
 scaler = OperatingRegimeScaler().fit(fit, subset, CONFIG['split_seed'])
-demo = WindowDataset(fit, scaler, CONFIG, mode='correction', family='bias', seed=42)[0]
+# Make this illustration visibly faulty; training retains its configured onset range.
+DEMO_CONFIG = {**CONFIG, 'fault_start_horizon': 0}
+demo = WindowDataset(fit, scaler, DEMO_CONFIG, mode='correction', family='bias', seed=42)[0]
 affected = np.flatnonzero(demo['altered'].any(0).numpy())
 j = int(affected[0]) if len(affected) else 2
 valid = demo['valid'].numpy()
