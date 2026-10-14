@@ -14,6 +14,7 @@ import torch
 
 from grace_rul.artifacts import load_bundle, run_experiment
 from grace_rul.benchmark import _comparison_tables, paired_bootstrap
+from grace_rul.checkpoints import load_checkpoint, pipeline_identity, save_checkpoint
 from grace_rul.config import DEFAULT_CONFIG, quick_config
 from grace_rul.data import OperatingRegimeScaler, WindowDataset, load_training_subset
 from grace_rul.model import GraceRUL
@@ -216,6 +217,42 @@ class ResearchTraining(unittest.TestCase):
                           {"minimum_learning_rate": float("nan")}, {"detector_positive_weight_cap": .5}]:
             with self.subTest(overrides=overrides), self.assertRaises(ValueError):
                 validate_training_config({**self.config, **overrides})
+
+    def test_reporting_switches_reuse_epochs_but_training_changes_do_not(self):
+        original = pipeline_identity(self.fit, self.val, "FD001", self.config, 42)
+        # Existing format-5 checkpoints included these report-only settings.
+        legacy = {**original, "config": {**original["config"],
+                  "run_matched_benchmarks": True, "run_extended_evaluation": True,
+                  "benchmark_variants": DEFAULT_CONFIG["benchmark_variants"]}}
+        reduced = {**self.config, "run_extended_evaluation": False,
+                   "run_matched_benchmarks": False, "benchmark_variants": []}
+        identity = pipeline_identity(self.fit, self.val, "FD001", reduced, 42)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pipeline.pt"
+            save_checkpoint(path, {"identity": legacy, "next_epoch": 3})
+            self.assertEqual(load_checkpoint(path, identity)["next_epoch"], 3)
+            changed = pipeline_identity(self.fit, self.val, "FD001",
+                                        {**reduced, "window_stride": 1}, 42)
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                load_checkpoint(path, changed)
+
+    def test_skipping_extended_reports_preserves_exported_weights(self):
+        config = {**self.config, "maximum_batches": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "quick"
+            with patch("grace_rul.benchmark.run_matched_benchmarks", side_effect=AssertionError("Unexpected benchmark training")):
+                path, full_tables = run_experiment(ROOT, config, output)
+                before, _ = load_bundle(path)
+                with patch("grace_rul.training.critic_update", side_effect=AssertionError("Cached model retrained")):
+                    path, reduced_tables = run_experiment(ROOT, {**config, "run_extended_evaluation": False}, output)
+                after, _ = load_bundle(path)
+            for report in ["robustness_summary", "ablation_metrics"]:
+                self.assertFalse(full_tables[report].empty)
+                self.assertNotIn(report, reduced_tables)
+            for name, weights in before["models"]["FD001"]["state_dict"].items():
+                torch.testing.assert_close(after["models"]["FD001"]["state_dict"][name], weights, rtol=0, atol=0)
+            for name, frame in reduced_tables.items():
+                pd.testing.assert_frame_equal(full_tables[name], frame)
 
     def test_trained_comparisons_share_engines_targets_and_corruption_draws(self):
         config = {**self.config, "maximum_batches": 1, "tune_before_training": True,

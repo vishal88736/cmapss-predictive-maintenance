@@ -55,11 +55,24 @@ bash scripts/setup_env.sh --cuda
 .venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v5
 ```
 
-This defaults to FD001–FD004, five seeds, validation search, three grouped OOF folds,
-all robustness conditions, and six trained comparison variants. There are up to
-20 search fits and 80 primary upstream/fold fits, plus the comparator fits.
+This defaults to FD001–FD004, five seeds, validation search, and three grouped OOF folds.
+There are up to 20 search fits and 80 primary upstream/fold fits. Separate comparison
+training and extended robustness/ablation reports are disabled by default. The model,
+training losses, epoch budgets, validation, calibration, and seed selection are unchanged.
+Enabling the six comparison variants adds 360 upstream/fold fits of differing sizes
+and training stages, so fit counts alone do not determine wall-clock savings.
 Early stopping can reduce epochs. A functioning CUDA PyTorch environment is needed
 for a practical full study. CPU execution requires explicit `--device cpu`.
+
+For the complete comparison and reporting workflow:
+
+```bash
+.venv/bin/python scripts/train_research.py --device cuda --benchmarks --extended-evaluation --output-dir artifacts/research_with_reports
+```
+
+The notebook exposes the same switches through `CONFIG['run_matched_benchmarks']`
+and `CONFIG['run_extended_evaluation']`. Its optional SHAP/LIME example uses
+`RUN_EXPLANATIONS = True`; on-demand website explanations remain available.
 
 ```bash
 .venv/bin/python scripts/train_research.py --quick --device cpu --output-dir /tmp/grace-research-check
@@ -70,9 +83,11 @@ Quick notebook mode checks the main pipeline and skips those additional experime
 Neither quick run qualifies as research performance evidence.
 
 `--config settings.json` overrides known configuration keys; `--subsets`, `--seeds`,
-and `--benchmark-variants` choose a reduced study. `--skip-tuning` and
+and `--benchmark-variants` choose a reduced study. Specifying comparison variants
+enables benchmarks unless `--skip-benchmarks` is also given. `--skip-tuning` and
 `--skip-benchmarks` skip those steps explicitly. Rerunning with the same output
-directory resumes matching upstream checkpoints; changed data/settings require a
+directory resumes matching upstream checkpoints. Report switches do not invalidate
+completed epochs; changed training data/settings require a
 fresh directory. OOF collection, correction search, and evaluation rerun.
 
 ## Evaluate the evidence
@@ -91,13 +106,15 @@ Optional variants include pure Transformer and separately trained local/global
 predictors. Existing `ablation_metrics.csv` contains inference interventions and
 retains that label; these are different experiments.
 
-Run outputs include:
+Core outputs include training/correction histories, clean test metrics, calibration,
+seed selection, upstream cross-validation, and the model bundle. Optional outputs include:
 
 - `validation_search.csv` and `tuning/search_manifest.json`: trial scores, selected
   settings, partitions, and training-file hashes.
 - `test_seed_summary.csv`: clean test mean/std across training seeds, separate
   capped-125 and official-uncapped target conventions.
-- `benchmark_metrics.csv`, `benchmark_summary.csv`, and compressed predictions:
+- `robustness_summary.csv` and `ablation_metrics.csv`: generated only with extended evaluation.
+- `benchmark_metrics.csv`, `benchmark_summary.csv`, and compressed predictions (with benchmarks enabled):
   every comparator, seed, condition, and corruption replicate.
 - `benchmark_comparison.csv`: paired RMSE differences and 95% bootstrap intervals.
 - `superiority_checks.csv`: corrupted macro improvement, uncertainty, clean-data

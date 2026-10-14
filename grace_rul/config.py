@@ -35,7 +35,8 @@ DEFAULT_CONFIG = {
     "max_clean_rmse_increase": 0.05, "max_intact_repair_rmse": 0.15,
     "max_reconstruction_rmse": 1.5,
     "predictor_family": "gated", "train_repair": True,
-    "tune_before_training": True, "run_matched_benchmarks": True,
+    "tune_before_training": True, "run_matched_benchmarks": False,
+    "run_extended_evaluation": False,
     "benchmark_variants": ["paper_A_cnn_gru", "paper_B_repair_cnn_lstm",
                            "paper_C_transformer_corrected", "grace_without_adversarial",
                            "grace_without_trend", "grace_without_repair"],
@@ -58,4 +59,5 @@ def quick_config(config):
             "explanation_samples": 64, "window_stride": 5,
             "validation_prefixes": 2, "correction_prefixes": 3,
             "correction_bounds": [15.0], "tune_before_training": False,
-            "run_matched_benchmarks": False, "bootstrap_samples": 100}
+            "run_matched_benchmarks": False, "run_extended_evaluation": True,
+            "bootstrap_samples": 100}

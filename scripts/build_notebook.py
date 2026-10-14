@@ -25,8 +25,9 @@ It uses the `grace_rul/` package so the website loads exactly the same model def
 Keep this notebook, that package, and `data/` together. Install `requirements.txt` or run
 `bash scripts/setup_env.sh`, then choose the **Python (GRACE-RUL)** kernel.
 
-The default `QUICK_RUN = False` tunes on validation data, trains all four subsets
-with five seeds, and trains matched architecture comparators and ablations using CUDA.
+The default `QUICK_RUN = False` tunes on validation data and trains all four subsets
+with five seeds using CUDA. Separate comparison models and extended evaluation reports
+are disabled by default to reduce runtime while preserving the main training procedure.
 PyTorch must detect an accessible GPU; a CUDA request never silently falls back to CPU.
 Set it to `True` only for a small FD001 execution check. Quick artifacts are clearly
 labeled and are not benchmark evidence. A full run has a substantial compute cost.
@@ -80,6 +81,7 @@ execution check requires changing the device to `'cpu'`.
 """)
 code("""
 QUICK_RUN = False
+RUN_EXPLANATIONS = False
 CONFIG = dict(DEFAULT_CONFIG)
 CONFIG['device'] = 'cuda'
 if QUICK_RUN:
@@ -186,10 +188,13 @@ before the final corrector learns from their out-of-fold targets. Fold-level rec
 and mean/std summaries are saved. They are explicitly upstream CV; the complete
 corrected pipeline is evaluated separately on official test files.
 
-It then evaluates clean and corrupted endpoint predictions, unseen severities in full mode,
-five seeds, and inference-intervention ablations. Full mode also separately trains
+It evaluates clean official test endpoints and records upstream cross-validation metrics.
+Set `CONFIG['run_extended_evaluation'] = True` for extra corrupted endpoint predictions,
+unseen severities, and inference-intervention ablations. Set
+`CONFIG['run_matched_benchmarks'] = True` to separately train
 CNN–GRU, repair/CNN–LSTM, and Transformer/correction adaptations plus retrained
-GRACE ablations. Identical test engines and corruptions support paired seed/engine
+GRACE ablations. These optional experiments do not update the primary model.
+Identical test engines and corruptions support paired seed/engine
 bootstrap comparisons. The Transformer comparator uses supervised residual correction,
 not the original TD3. These are harmonized adaptations, not reproductions of published
 paper scores. Quick notebook mode skips tuning/comparators; `scripts/train_research.py
@@ -221,9 +226,7 @@ fig.savefig(RUN_DIR / 'training_curves.png', dpi=150); plt.show()
 display(TABLES['test_metrics'])
 display(TABLES['cross_validation_metrics'])
 display(TABLES['cross_validation_summary'])
-display(TABLES['robustness_summary'])
-display(TABLES['ablation_metrics'])
-for name in ['validation_search', 'test_seed_summary', 'benchmark_summary', 'superiority_checks']:
+for name in ['robustness_summary', 'ablation_metrics', 'validation_search', 'test_seed_summary', 'benchmark_summary', 'superiority_checks']:
     if name in TABLES:
         display(Markdown(f'**{name}**'))
         display(TABLES[name])
@@ -273,24 +276,29 @@ Backgrounds are selected by operating-setting similarity. LIME reports weighted
 held-out perturbation fidelity. SHAP contributions and LIME coefficients have different
 scales; agreement is not forced. High RUL importance alone does not establish a fault.
 
+Set `RUN_EXPLANATIONS = True` in the configuration cell to generate these optional plots.
+They are skipped by default and do not affect saved model weights.
 The full run uses three temporal blocks per sensor; quick mode uses one to reduce cost.
 Detailed website explanations are computed on demand after an engine is selected.
 """)
 code("""
-explanation = explain_window(entry['model'], sample['x'], sample['valid'],
+if RUN_EXPLANATIONS:
+    explanation = explain_window(entry['model'], sample['x'], sample['valid'],
                              entry['entry']['background'], entry['entry']['background_valid'],
                              target_sensor=suspect if bool(entry['model'].repair_enabled) else None, samples=CONFIG['explanation_samples'],
                              seed=CONFIG['seed'], time_blocks=1 if QUICK_RUN else 3)
-(RUN_DIR / f'explanation_{subset}.json').write_text(json.dumps(explanation, indent=2))
-fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-for axis, target in zip(axes, explanation['targets']):
-    values = pd.DataFrame(target['sensors']).head(10).iloc[::-1]
-    axis.barh(values.sensor, values.shap)
-    axis.set_title(f\"SHAP: {target['target']}\")
-    axis.set_xlabel(target['units'])
-    print(target['target'], 'LIME held-out fidelity:', target['lime_holdout_fidelity'])
-    display(pd.DataFrame(target['sensors']).head(10))
-fig.tight_layout(); fig.savefig(RUN_DIR / 'shap_sensor_evidence.png', dpi=150); plt.show()
+    (RUN_DIR / f'explanation_{subset}.json').write_text(json.dumps(explanation, indent=2))
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    for axis, target in zip(axes, explanation['targets']):
+        values = pd.DataFrame(target['sensors']).head(10).iloc[::-1]
+        axis.barh(values.sensor, values.shap)
+        axis.set_title(f\"SHAP: {target['target']}\")
+        axis.set_xlabel(target['units'])
+        print(target['target'], 'LIME held-out fidelity:', target['lime_holdout_fidelity'])
+        display(pd.DataFrame(target['sensors']).head(10))
+    fig.tight_layout(); fig.savefig(RUN_DIR / 'shap_sensor_evidence.png', dpi=150); plt.show()
+else:
+    print('Optional SHAP/LIME plots skipped. Set RUN_EXPLANATIONS = True to generate them.')
 """)
 md("""
 ## Connect the website

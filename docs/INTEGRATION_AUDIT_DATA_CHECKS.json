@@ -1,0 +1,75 @@
+{
+  "date": "2026-10-14",
+  "scope": "real data/scaler/corruption code; tensor wrappers only; no neural-network or training execution",
+  "datasets": [
+    {
+      "subset": "FD001",
+      "train_engines": 100,
+      "test_engines": 100,
+      "fit": 72,
+      "validation": 20,
+      "calibration": 8,
+      "regimes": 1,
+      "overlap_consistent": true,
+      "test_endpoints": 100
+    },
+    {
+      "subset": "FD002",
+      "train_engines": 260,
+      "test_engines": 259,
+      "fit": 187,
+      "validation": 52,
+      "calibration": 21,
+      "regimes": 6,
+      "overlap_consistent": true,
+      "test_endpoints": 259
+    },
+    {
+      "subset": "FD003",
+      "train_engines": 100,
+      "test_engines": 100,
+      "fit": 72,
+      "validation": 20,
+      "calibration": 8,
+      "regimes": 1,
+      "overlap_consistent": true,
+      "test_endpoints": 100
+    },
+    {
+      "subset": "FD004",
+      "train_engines": 249,
+      "test_engines": 248,
+      "fit": 179,
+      "validation": 50,
+      "calibration": 20,
+      "regimes": 6,
+      "overlap_consistent": true,
+      "test_endpoints": 248
+    }
+  ],
+  "findings": {
+    "drift_prefix_changes_when_only_future_length_changes": true,
+    "prefix_rows": 30,
+    "short_trajectory_rows": 60,
+    "long_trajectory_rows": 120,
+    "maximum_normalized_prefix_difference": 0.04858291149139404,
+    "fault_start_and_slope_identical": true
+  },
+  "checks_passed": [
+    "disjoint fit/validation/calibration engines",
+    "OOF fitting/inner-validation/held-engine separation",
+    "scaler fitted on fitting engines only",
+    "finite scaled fit/validation/test data",
+    "sampled observation and damage-mask dimensions",
+    "sampled capped/raw target separation",
+    "one official endpoint per test engine",
+    "cached overlap consistency"
+  ],
+  "neural_network_execution": "not run; PyTorch unavailable",
+  "source_sha256": {
+    "grace_rul/model.py": "3b56cb4a45972539c7b0ce51ea151ad65666b0f99b66c6da46c309a9825c25ca",
+    "grace_rul/data.py": "8436fd457367a2adabee753ddd62778c82b478b4b8d76b0750c15422dc0ace9d",
+    "grace_rul/training.py": "65835c60d83d3b73cc0e7fb6be9ada0314b31b56f5a49e14998844e044efcdc1",
+    "grace_rul/config.py": "ae3c7c2432a219047f3fb08d699c576dab73920b19013c931ce5b12a9a8d7609"
+  }
+}

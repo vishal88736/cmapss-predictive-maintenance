@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from .checkpoints import pipeline_identity
+from .checkpoints import matches_pipeline_identity, pipeline_identity
 from .config import SUBSETS
 from .data import FAULTS, OperatingRegimeScaler, WindowDataset, load_subset, source_hashes
 from .model import GraceRUL
@@ -116,7 +116,7 @@ def run_matched_benchmarks(project_root, run_dir, config):
             cfg, groups = entry["training_config"], entry["partitions"]
             fit, validation = [train[train.unit.isin(groups[name])] for name in ["fit", "validation"]]
             if (entry["source_hashes"] != source_hashes(root / "data", subset) or
-                    entry["pipeline_identity"] != pipeline_identity(fit, validation, subset, cfg, seed)):
+                    not matches_pipeline_identity(entry["pipeline_identity"], pipeline_identity(fit, validation, subset, cfg, seed))):
                 raise ValueError("Benchmark seed artifact no longer matches the run's data/configuration.")
             primary = GraceRUL(cfg).to(device_for(cfg))
             primary.load_state_dict(entry["state_dict"])

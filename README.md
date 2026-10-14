@@ -6,6 +6,7 @@ PyTorch implementation in `grace_rul/`.
 
 - [Final architecture and paper analysis](docs/FINAL_ARCHITECTURE.md)
 - [Training audit, fixes, and cleanup](docs/TRAINING_AUDIT.md)
+- [Current paper integration audit](docs/INTEGRATION_AUDIT_2026-10-14.md)
 - [Improved training and comparison workflow](docs/RESEARCH_TRAINING.md)
 - [Training notebook](GRACE_RUL_all_subsets.ipynb)
 - [Python requirements](requirements.txt)
@@ -30,11 +31,14 @@ and `GRACE_TORCH_VERSION` to a supported combination.
 
 The default `QUICK_RUN = False` trains the finalized dimensions on FD001–FD004
 with five seeds and three engine-disjoint correction folds, preceded by validation-only
-tuning and followed by separately trained comparison models. It explicitly requests
+tuning. Separate comparison models, extended robustness/ablation reports, and notebook
+SHAP/LIME plots are skipped by default. It explicitly requests
 CUDA and stops if no CUDA GPU is accessible. Full training has a substantial compute
 cost. Set `QUICK_RUN = True` only for a small FD001 execution check; select
 `CONFIG['device'] = 'cpu'` explicitly if that check should use CPU.
-Full training uses stride-1 windows with balanced engine sampling; validation search
+These defaults retain the full training procedure and reduce the scheduled upstream
+fits from 460 to 100: 20 tuning fits and 80 primary/fold fits. Actual runtime savings
+depend on the model and early stopping. Full training uses stride-1 windows with balanced engine sampling; validation search
 also tries stride 5. Official test predictions use the last observed endpoint per engine.
 
 The same workflow is available without a notebook:
@@ -49,7 +53,17 @@ For a small CPU check including tuning and trained comparisons:
 .venv/bin/python scripts/train_research.py --quick --device cpu --output-dir /tmp/grace-research-check
 ```
 
-The full command is a substantial study, including many temporary fold models.
+The default command still includes many temporary fold models. To also run the
+separate comparisons and extended evaluation reports, use:
+
+```bash
+.venv/bin/python scripts/train_research.py --device cuda --benchmarks --extended-evaluation --output-dir artifacts/research_with_reports
+```
+
+In the notebook, set `CONFIG['run_matched_benchmarks'] = True` and
+`CONFIG['run_extended_evaluation'] = True` before training to enable these reports.
+Set `RUN_EXPLANATIONS = True` in its configuration cell for optional SHAP/LIME plots.
+Website explanations remain available on demand using the saved fitting backgrounds.
 See [research training](docs/RESEARCH_TRAINING.md) for outputs, scope, and CLI options.
 
 Keep the notebook, `grace_rul/`, `data/`, and `docs/` together. All required C-MAPSS
@@ -83,7 +97,9 @@ BUNDLE_PATH, TABLES = run_experiment(
 Training resumes from the last completed upstream epoch. Completed pipelines are
 loaded; correction features, the small residual corrector, and evaluations are
 recomputed. A changed training configuration, architecture, or engine data requires
-a new run directory. Format-3/4 checkpoints and bundles cannot be reused with the
+a new run directory. Report switches can change without invalidating completed
+upstream epochs; rerun with the same output directory to reuse them.
+Format-3/4 checkpoints and bundles cannot be reused with the
 improved format-5 pipeline; retrain in a fresh directory. The interrupted October
 8 run and its notebook outputs were removed during the October 11 audit.
 
@@ -164,6 +180,7 @@ Setup follows the [official PyTorch CUDA installation workflow](https://pytorch.
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 .venv/bin/python scripts/validate_notebook.py
+.venv/bin/python scripts/validate_notebook.py --explanations
 ```
 
 The notebook validator overrides full-training settings only in memory to use a
@@ -177,7 +194,7 @@ Use `scripts/validate_notebook.py --all-subsets` to validate all four subsets wi
 small dimensions, or `--device cuda` to validate on an accessible GPU. These
 checks do not modify the checked-in notebook's full-mode CUDA defaults.
 
-The quick run validates execution, not research performance. The full workflow now
-trains matched comparators, but those experiments must complete before any accuracy
+The quick run validates execution, not research performance. The optional comparison
+workflow trains matched comparators, and those experiments must complete before any superiority
 claim. Published-paper superiority additionally requires faithful original-protocol
 reproductions and disclosed comparable tuning budgets.

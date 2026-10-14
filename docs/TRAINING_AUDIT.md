@@ -19,9 +19,10 @@ The integration is implemented, but superiority over the papers is unproven.
 See [the architecture analysis](FINAL_ARCHITECTURE.md) for PDF filenames, reported
 results, and method details. The [archived Trans-D3 article](https://pmc.ncbi.nlm.nih.gov/articles/PMC13210881/)
 also confirms the correction-state inconsistency. Tang's
-[September correction](https://journals.plos.org/plosone/article/citation?id=10.1371%2Fjournal.pone.0357561)
-was verified to exist; its full contents could not be retrieved. Numerical
-comparisons with that paper still need the correction checked.
+[September correction](https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0357561&type=printable)
+was retrieved during the 14 October follow-up and verified to correct the funding
+statement only. See [the current integration audit](INTEGRATION_AUDIT_2026-10-14.md)
+for the renewed paper/code review and the open fault-simulation protocol finding.
 
 ## Verified problems and changes
 

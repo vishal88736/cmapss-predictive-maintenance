@@ -1,4 +1,4 @@
-"""Run validation tuning, final GRACE-RUL training, and matched comparisons."""
+"""Train GRACE-RUL, with optional extended evaluation and matched comparisons."""
 
 import argparse
 import json
@@ -19,10 +19,13 @@ def main():
     parser.add_argument("--quick", action="store_true", help="Small execution check, excluded from benchmark claims.")
     parser.add_argument("--subsets", nargs="+", choices=SUBSETS)
     parser.add_argument("--seeds", nargs="+", type=int)
-    parser.add_argument("--output-dir", type=Path, help="Reuse an existing directory only with unchanged configuration.")
+    parser.add_argument("--output-dir", type=Path, help="Reuse an existing directory with unchanged training settings; report switches may change.")
     parser.add_argument("--config", type=Path, help="JSON overrides for the default configuration.")
     parser.add_argument("--skip-tuning", action="store_true")
-    parser.add_argument("--skip-benchmarks", action="store_true")
+    benchmarks = parser.add_mutually_exclusive_group()
+    benchmarks.add_argument("--benchmarks", action="store_true", help="Train separate comparison models after exporting GRACE-RUL.")
+    benchmarks.add_argument("--skip-benchmarks", action="store_true")
+    parser.add_argument("--extended-evaluation", action="store_true", help="Generate extra robustness and inference-ablation reports.")
     parser.add_argument("--benchmark-variants", nargs="+", choices=sorted(VARIANTS))
     args = parser.parse_args()
     config = dict(DEFAULT_CONFIG)
@@ -43,6 +46,11 @@ def main():
         config["seeds"] = args.seeds
     if args.benchmark_variants:
         config["benchmark_variants"] = args.benchmark_variants
+        config["run_matched_benchmarks"] = True
+    if args.benchmarks:
+        config["run_matched_benchmarks"] = True
+    if args.extended_evaluation:
+        config["run_extended_evaluation"] = True
     if args.skip_tuning:
         config["tune_before_training"] = False
     if args.skip_benchmarks:

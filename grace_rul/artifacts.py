@@ -69,25 +69,26 @@ def run_experiment(project_root, config, output_dir=None):
                 lo, hi = interval_bounds(predictions.prediction, calibration)
                 row["Interval_Coverage"] = float(((target >= lo) & (target <= hi)).mean())
                 clean_metrics.append(row)
-            families = ["intermittent", "bias"] if config["quick_run"] else [*FAULTS, "mixed"]
-            severities = [.2] if config["quick_run"] else [.1, .2, .3, .4, .5]
-            replicates = [0] if config["quick_run"] else [0, 1, 2]
-            for family in families:
-                progress.emit(f"evaluating robustness: {family}", force=True)
-                for severity in severities:
-                    for replicate in replicates:
-                        ds = WindowDataset(test, scaler, config, mode="test", seed=config["validation_seed"] + 100000 + replicate, family=family, severity=severity, truths=truths)
-                        fault_report, fault_predictions = evaluate(model, ds, config, fault_thresholds=thresholds)
-                        progress.emit(f"robustness: {family} severity={severity} replicate={replicate + 1}/{len(replicates)} complete")
-                        lo, hi = interval_bounds(fault_predictions.prediction, calibration)
-                        robustness.append({"subset": subset, "seed": seed, "family": family, "severity": severity, "replicate": replicate, **fault_report,
-                            "Interval_Coverage": float(((fault_predictions.target >= lo) & (fault_predictions.target <= hi)).mean()),
-                            "relative_RMSE_increase": fault_report["RMSE"] / max(report["RMSE"], 1e-8) - 1})
-            for variant, options in [("full", {}), ("no_repair", {"use_repair": False}), ("local_only", {"branch": "local"}), ("global_only", {"branch": "global"}), ("equal_fusion", {"equal_fusion": True}), ("no_correction", {"use_correction": False})]:
-                progress.emit(f"evaluating ablation: {variant}")
-                ds = WindowDataset(test, scaler, config, mode="test", seed=config["validation_seed"] + 100000, family="bias", severity=.2, truths=truths)
-                ablation, _ = evaluate(model, ds, config, fault_thresholds=thresholds, **options)
-                ablations.append({"subset": subset, "seed": seed, "variant": variant, "kind": "inference intervention; not a retrained baseline", **ablation})
+            if config.get("run_extended_evaluation", False):
+                families = ["intermittent", "bias"] if config["quick_run"] else [*FAULTS, "mixed"]
+                severities = [.2] if config["quick_run"] else [.1, .2, .3, .4, .5]
+                replicates = [0] if config["quick_run"] else [0, 1, 2]
+                for family in families:
+                    progress.emit(f"evaluating robustness: {family}", force=True)
+                    for severity in severities:
+                        for replicate in replicates:
+                            ds = WindowDataset(test, scaler, config, mode="test", seed=config["validation_seed"] + 100000 + replicate, family=family, severity=severity, truths=truths)
+                            fault_report, fault_predictions = evaluate(model, ds, config, fault_thresholds=thresholds)
+                            progress.emit(f"robustness: {family} severity={severity} replicate={replicate + 1}/{len(replicates)} complete")
+                            lo, hi = interval_bounds(fault_predictions.prediction, calibration)
+                            robustness.append({"subset": subset, "seed": seed, "family": family, "severity": severity, "replicate": replicate, **fault_report,
+                                "Interval_Coverage": float(((fault_predictions.target >= lo) & (fault_predictions.target <= hi)).mean()),
+                                "relative_RMSE_increase": fault_report["RMSE"] / max(report["RMSE"], 1e-8) - 1})
+                for variant, options in [("full", {}), ("no_repair", {"use_repair": False}), ("local_only", {"branch": "local"}), ("global_only", {"branch": "global"}), ("equal_fusion", {"equal_fusion": True}), ("no_correction", {"use_correction": False})]:
+                    progress.emit(f"evaluating ablation: {variant}")
+                    ds = WindowDataset(test, scaler, config, mode="test", seed=config["validation_seed"] + 100000, family="bias", severity=.2, truths=truths)
+                    ablation, _ = evaluate(model, ds, config, fault_thresholds=thresholds, **options)
+                    ablations.append({"subset": subset, "seed": seed, "variant": variant, "kind": "inference intervention; not a retrained baseline", **ablation})
             background_ds = WindowDataset(fit, scaler, config, mode="correction", seed=seed, family="clean")
             background = [background_ds[i] for i in range(min(config["background_size"], len(background_ds)))]
             entry = {"state_dict": {k: v.detach().cpu() for k, v in model.state_dict().items()}, "scaler": scaler.state,
@@ -111,8 +112,11 @@ def run_experiment(project_root, config, output_dir=None):
         models[subset] = selected
     config = run_config
     tables = {"training_history": pd.concat(histories, ignore_index=True), "correction_history": pd.concat(correction_histories, ignore_index=True),
-        "test_metrics": pd.DataFrame(clean_metrics), "robustness_summary": pd.DataFrame(robustness), "ablation_metrics": pd.DataFrame(ablations), "seed_summary": pd.DataFrame(seed_summary),
+        "test_metrics": pd.DataFrame(clean_metrics), "seed_summary": pd.DataFrame(seed_summary),
         "cross_validation_metrics": pd.concat(cross_validation_reports, ignore_index=True)}
+    if config.get("run_extended_evaluation", False):
+        tables["robustness_summary"] = pd.DataFrame(robustness)
+        tables["ablation_metrics"] = pd.DataFrame(ablations)
     tables["cross_validation_summary"] = tables["cross_validation_metrics"].groupby(["subset", "seed", "family", "scope"], as_index=False).agg(
         folds=("fold", "nunique"), RMSE_mean=("RMSE", "mean"), RMSE_std=("RMSE", "std"), MAE_mean=("MAE", "mean"), MAE_std=("MAE", "std"))
     tables["test_seed_summary"] = tables["test_metrics"].groupby(["subset", "protocol"], as_index=False).agg(

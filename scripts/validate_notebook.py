@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=["cpu", "cuda", "auto"], default="cpu")
     parser.add_argument("--all-subsets", action="store_true", help="Check FD001–FD004 with quick dimensions.")
+    parser.add_argument("--explanations", action="store_true", help="Also execute optional SHAP/LIME plots.")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "artifacts" / "validation")
     args = parser.parse_args()
     os.chdir(ROOT)
@@ -49,6 +50,8 @@ def main():
                             for target in node.targets:
                                 if isinstance(target, ast.Name) and target.id == "QUICK_RUN":
                                     node.value = ast.Constant(True)
+                                if isinstance(target, ast.Name) and target.id == "RUN_EXPLANATIONS":
+                                    node.value = ast.Constant(args.explanations)
                                 if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) and target.value.id == "CONFIG" and isinstance(target.slice, ast.Constant) and target.slice.value == "device":
                                     node.value = ast.Constant(args.device)
                         source = ast.fix_missing_locations(tree)

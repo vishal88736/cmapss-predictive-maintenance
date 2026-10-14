@@ -11,13 +11,29 @@ import torch
 from .config import ARCHITECTURE
 
 
+REPORT_OPTIONS = {"progress_interval_seconds", "run_extended_evaluation",
+                  "run_matched_benchmarks", "benchmark_variants"}
+
+
+def _training_config(config):
+    return {key: value for key, value in config.items() if key not in REPORT_OPTIONS}
+
+
+def matches_pipeline_identity(saved, expected):
+    """Report switches may change without invalidating trained epoch weights."""
+    if not isinstance(saved, dict):
+        return False
+    return ({**saved, "config": _training_config(saved.get("config", {}))} ==
+            {**expected, "config": _training_config(expected.get("config", {}))})
+
+
 def pipeline_identity(train_frame, validation_frame, subset, config, seed):
     def fingerprint(frame):
         values = pd.util.hash_pandas_object(frame, index=False).values.tobytes()
         return hashlib.sha256(values + repr(list(frame.columns)).encode()).hexdigest()
 
     return {"version": 2, "architecture": ARCHITECTURE, "subset": subset, "seed": int(seed),
-            "config": {k: v for k, v in config.items() if k != "progress_interval_seconds"},
+            "config": _training_config(config),
             "fit": fingerprint(train_frame), "validation": fingerprint(validation_frame)}
 
 
@@ -61,6 +77,6 @@ def load_checkpoint(path, identity):
     if path is None or not Path(path).exists():
         return None
     state = torch.load(path, map_location="cpu", weights_only=True)
-    if state.get("identity") != identity:
+    if not matches_pipeline_identity(state.get("identity"), identity):
         raise ValueError(f"Checkpoint does not match this configuration or engine data: {path}. Start a new run directory.")
     return state
