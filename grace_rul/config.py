@@ -2,6 +2,7 @@
 
 FORMAT_VERSION = 5
 ARCHITECTURE = "detector-residual-bilstm-wgan-gated-cnn-gru-transformer-residual-v5"
+CORRUPTION_PROTOCOL = "persistent-causal-faults-v2"
 SETTINGS = [f"setting_{i}" for i in range(1, 4)]
 SENSORS = [f"sensor_{i}" for i in range(1, 22)]
 FEATURE_COLUMNS = SETTINGS + SENSORS
@@ -24,6 +25,7 @@ DEFAULT_CONFIG = {
     "critic_steps": 1, "gradient_penalty": 10.0, "gradient_penalty_batch_size": 16,
     "adversarial_warmup": 5,
     "oof_folds": 3, "window_stride": 1, "clean_fraction": 0.25,
+    "fault_start_horizon": 100, "drift_ramp_cycles": 100,
     "split_seed": 42, "validation_seed": 31415, "validation_prefixes": 3,
     "correction_prefixes": 6, "engine_balanced_sampling": True,
     "rul_loss_weight": 1.0, "reconstruction_loss_weight": 1.0,

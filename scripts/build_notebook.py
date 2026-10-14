@@ -76,6 +76,10 @@ Partition and corruption seeds are fixed across training seeds. Validation sampl
 three prefixes per engine; correction uses six; calibration retains one independent
 endpoint per engine. Full runs train separate models for each subset. Seeds are selected using validation
 performance, never test scores. Training explicitly requests `CONFIG['device'] = 'cuda'`.
+Fault starts use absolute observed offsets up to `CONFIG['fault_start_horizon']`;
+drift ramps over `CONFIG['drift_ramp_cycles']`, independently of final trajectory
+length. Mixed faults use independent random streams. Defaults are 100 cycles for
+both controls. Checkpoints from the earlier simulator require a fresh run directory.
 Use `nvidia-smi` and the GPU check in README.md before starting. An intentional CPU
 execution check requires changing the device to `'cpu'`.
 """)
@@ -180,6 +184,8 @@ epochs (including OOF models) are saved in the printed run directory's `checkpoi
 To resume after interrupting, restart the kernel and rerun setup/configuration with
 the same settings, then pass that run directory as `output_dir` to `run_experiment`.
 Completed upstream models load from checkpoints; correction and evaluation rerun.
+The corrected `persistent-causal-faults-v2` simulator has a new training identity;
+pre-correction checkpoints require a fresh directory even if their bundle format is 5.
 Older format-3/4 runs are incompatible with the residual-recovery format-5 pipeline and
 require fresh training. The interrupted October 8 artifacts have been removed.
 

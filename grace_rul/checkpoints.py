@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from .config import ARCHITECTURE
+from .config import ARCHITECTURE, CORRUPTION_PROTOCOL
 
 
 REPORT_OPTIONS = {"progress_interval_seconds", "run_extended_evaluation",
@@ -32,7 +32,8 @@ def pipeline_identity(train_frame, validation_frame, subset, config, seed):
         values = pd.util.hash_pandas_object(frame, index=False).values.tobytes()
         return hashlib.sha256(values + repr(list(frame.columns)).encode()).hexdigest()
 
-    return {"version": 2, "architecture": ARCHITECTURE, "subset": subset, "seed": int(seed),
+    return {"version": 3, "architecture": ARCHITECTURE, "corruption_protocol": CORRUPTION_PROTOCOL,
+            "subset": subset, "seed": int(seed),
             "config": _training_config(config),
             "fit": fingerprint(train_frame), "validation": fingerprint(validation_frame)}
 
@@ -78,5 +79,5 @@ def load_checkpoint(path, identity):
         return None
     state = torch.load(path, map_location="cpu", weights_only=True)
     if not matches_pipeline_identity(state.get("identity"), identity):
-        raise ValueError(f"Checkpoint does not match this configuration or engine data: {path}. Start a new run directory.")
+        raise ValueError(f"Checkpoint does not match this configuration, corruption protocol or engine data: {path}. Start a new run directory.")
     return state

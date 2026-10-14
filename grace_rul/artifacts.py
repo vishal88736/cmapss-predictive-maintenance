@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from .config import ARCHITECTURE, FEATURE_COLUMNS, FORMAT_VERSION
+from .config import ARCHITECTURE, CORRUPTION_PROTOCOL, FEATURE_COLUMNS, FORMAT_VERSION
 from .data import FAULTS, WindowDataset, load_subset, source_hashes, split_engines
 from .training import calibrate, device_for, evaluate, fit_corrector, fit_pipeline, interval_bounds, metrics, select_fault_thresholds
 from .training import _Progress, validate_training_config
@@ -126,12 +126,14 @@ def run_experiment(project_root, config, output_dir=None):
         tables["validation_search"] = search_table
     for name, frame in tables.items():
         frame.to_csv(output / f"{name}.csv", index=False)
-    bundle = {"format_version": FORMAT_VERSION, "architecture": ARCHITECTURE, "feature_columns": FEATURE_COLUMNS,
+    bundle = {"format_version": FORMAT_VERSION, "architecture": ARCHITECTURE,
+              "corruption_protocol": CORRUPTION_PROTOCOL, "feature_columns": FEATURE_COLUMNS,
               "config": config, "models": models, "created_at": stamp, "torch_version": str(torch.__version__)}
     path = output / "grace_rul_ALL.pt"
     temporary = output / "bundle.tmp"
     torch.save(bundle, temporary); os.replace(temporary, path)
     (output / "run_manifest.json").write_text(json.dumps({"format_version": FORMAT_VERSION, "architecture": ARCHITECTURE,
+        "corruption_protocol": CORRUPTION_PROTOCOL,
         "quick_run": config["quick_run"], "created_at": stamp, "subsets": list(models), "artifact": path.name}, indent=2))
     print(f"Saved {'QUICK EXECUTION CHECK' if config['quick_run'] else 'FULL TRAINING RUN'}: {path}", flush=True)
     if config["run_matched_benchmarks"]:

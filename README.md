@@ -103,6 +103,19 @@ Format-3/4 checkpoints and bundles cannot be reused with the
 improved format-5 pipeline; retrain in a fresh directory. The interrupted October
 8 run and its notebook outputs were removed during the October 11 audit.
 
+The corrected simulator uses protocol `persistent-causal-faults-v2`. Fault onset is
+sampled at an absolute observed offset from 0 through `fault_start_horizon` (100
+by default). Drift ramps over `drift_ramp_cycles` (100 by default), then holds its
+sampled gain. Fault streams are independent, including mixed faults, so extending
+an engine's unseen future cannot change its already corrupted observations.
+The observation rows in C-MAPSS represent consecutive cycles.
+
+This changes training data. Start a fresh run directory for checkpoints created
+before this correction; the new training identity rejects the earlier protocol.
+Bundle format 5 and model tensor shapes are unchanged, and earlier format-5 bundles
+remain loadable for inference. Their results describe the earlier simulator.
+New bundles and run manifests record the corruption protocol explicitly.
+
 ## What the notebook implements
 
 1. Split complete engines into an 80% training pool and 20% validation. Reserve

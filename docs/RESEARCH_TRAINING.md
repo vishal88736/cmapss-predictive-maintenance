@@ -40,6 +40,23 @@ correction. The fixed split seed is 42; fixed validation corruption seed is 3141
 Every seed and comparator shares the selected per-subset settings. This modest
 search does not establish an optimal configuration.
 
+Sensor corruption uses `persistent-causal-faults-v2`. Onsets are sampled from the
+absolute observed offsets 0 through `fault_start_horizon` (default 100), independently
+of eventual failure or total trajectory length. Drift grows with elapsed cycles
+after onset over `drift_ramp_cycles` (default 100), then stays at its sampled gain.
+Missing blocks retain their specified duration and are clipped only by the observed
+array boundary. A fault whose onset lies beyond the observed history has no effect
+on that history. Per-fault random streams keep mixed faults independent of the
+number of random samples drawn by another fault. Overlapping windows share cached
+trajectory faults.
+
+The timing controls can be changed in notebook configuration or a CLI JSON config.
+This is a revised training-data protocol: pre-correction checkpoints cannot resume
+under it, even when the tensor architecture is still format 5. Use a fresh run
+directory. New epoch identities, bundles and run manifests record the protocol;
+existing format-5 weights can still be read for inference under their original
+training semantics. Accuracy under the corrected protocol requires a new run.
+
 `ReduceLROnPlateau` lowers the learning rate by 0.5 with patience 5,
 down to 1e-6. Epoch checkpoints include scheduler state and resume without repeating
 updates. Engine-balanced training uses a seeded weighted sampler with reciprocal

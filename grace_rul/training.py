@@ -221,10 +221,13 @@ def validation_score(model, clean_dataset, corrupt_dataset, config, **options):
 def validate_training_config(config):
     for name in ["predictor_epochs", "generator_epochs", "joint_epochs", "correction_epochs",
                  "patience", "batch_size", "gradient_penalty_batch_size", "critic_steps",
-                 "validation_prefixes", "correction_prefixes", "window_stride", "lr_patience", "bootstrap_samples"]:
+                 "validation_prefixes", "correction_prefixes", "window_stride", "lr_patience", "bootstrap_samples", "drift_ramp_cycles"]:
         value = config[name]
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(f"{name} must be a positive integer.")
+    horizon = config["fault_start_horizon"]
+    if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 0:
+        raise ValueError("fault_start_horizon must be a nonnegative integer.")
     for name in [k for k in config if k.endswith("_loss_weight")] + ["max_clean_rmse_increase", "max_intact_repair_rmse", "max_reconstruction_rmse"]:
         if not np.isfinite(config[name]) or config[name] < 0:
             raise ValueError(f"{name} must be finite and nonnegative.")

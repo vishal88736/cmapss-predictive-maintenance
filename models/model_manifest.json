@@ -1,6 +1,7 @@
 {
   "model_name": "GRACE-RUL",
   "format_version": 5,
+  "corruption_protocol": "persistent-causal-faults-v2",
   "state": "awaiting_training",
   "notebook": "GRACE_RUL_all_subsets.ipynb",
   "expected_artifact": "artifacts/<run>/grace_rul_ALL.pt",

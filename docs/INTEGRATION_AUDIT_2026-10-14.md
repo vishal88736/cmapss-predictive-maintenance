@@ -2,9 +2,9 @@
 
 GRACE-RUL combines the main architectural ideas coherently: selective recovery feeds a local CNN-GRU branch and a global Transformer branch, their features are fused, and a bounded supervised corrector adjusts the prediction. The implementation is a paper-inspired hybrid with explicitly different losses, preprocessing, and evaluation procedures. It does not establish the three papers' reported performance.
 
-One confirmed methodological issue needs attention before the next substantial training study: synthetic fault timing and drift can depend on the engine's final trajectory length. This can couple the corrupted input to remaining life even though the neural network does not receive RUL labels as features. The strength of any resulting shortcut in a trained model is unknown.
+The review confirmed a methodological issue: synthetic fault timing and drift depended on the engine's final trajectory length, potentially coupling corrupted inputs to remaining life. The authorized follow-up fixed this in protocol `persistent-causal-faults-v2`. New regression checks preserve observed corrupted histories when only unseen future length changes. Performance under the revised protocol still requires fresh training.
 
-The faster defaults from the preceding change are retained. This audit changes documentation and records checks; it does not change the model or fault-generation protocol.
+The faster defaults from the preceding change are retained. The follow-up changes the fault-generation protocol and training checkpoint identity; model tensor shapes and the format-5 architecture remain the same.
 
 ## Sources and scope
 
@@ -97,15 +97,17 @@ Pipeline checkpoints and final seeds use the average clean/mixed validation RMSE
 
 ## Findings requiring attention
 
-### 1. Synthetic faults depend on the final trajectory length
+### 1. Resolved: synthetic faults depended on the final trajectory length
 
-**Priority: address before a substantial robustness training study.** In [data.py](../grace_rul/data.py), line 131 samples fault start relative to `n // 2`, and lines 148-150 ramp drift across `n - start` positions. `n` is the complete training-engine trajectory length, which also determines training RUL. The same observed history can therefore receive different corruption when only its unseen future length changes.
+**Original finding.** The pre-correction [data.py](../grace_rul/data.py) sampled fault start relative to `n // 2` and ramped drift across `n - start` positions. `n` was the complete training-engine trajectory length, which also determines training RUL. The same observed history could therefore receive different corruption when only its unseen future length changed.
 
 A deterministic reproduction used identical first 30 observations, identical fault start (position 2), identical affected channels and identical slope, then changed the full trajectory from 60 to 120 observations. The maximum difference in the corrupted first 30 observations was **0.0485829115 normalized units**. The difference arises solely from the drift-ramp denominator.
 
-This confirms a simulator dependency on future length. It does not measure how strongly a trained predictor exploits it. Fault onset expressed as a fraction of lifetime creates an additional coupling risk. The earlier statement that the current simulator's starts/durations are independent of RUL was too strong.
+This confirmed a simulator dependency on future length. It did not measure how strongly a trained predictor exploits it. Fault onset expressed as a fraction of lifetime created an additional coupling risk. The earlier statement that the simulator's starts/durations were independent of RUL was too strong.
 
-Recommended correction: sample fault processes using absolute observed-cycle timing or a fixed horizon independent of eventual failure, and define drift using elapsed time after onset with an independently selected duration. Extending an identical trajectory must not alter its previously generated corrupted prefix. Preserve shared fault histories across overlapping windows. This is a training-data protocol change and needs fresh training and validation; it is not silently applied as part of a review.
+**Implemented correction.** Fault onset is sampled at an absolute observed offset from 0 through `fault_start_horizon` (default 100). Drift uses elapsed cycles after onset divided by `drift_ramp_cycles` (default 100), and its gain plateaus after that duration. Each constituent fault uses an independent random stream, so longer noise/missingness arrays cannot change a later mixed fault's parameters. Cached trajectory faults still preserve overlap consistency.
+
+Seven regression tests in [test_corruption.py](../tests/test_corruption.py) cover 2,160 short/extended-prefix scenarios, actual dataset input independence from future RUL, fixed drift duration/gain bounds, late onsets, damage labels, operating settings and overlapping windows. The new data-only checks passed with tensor-conversion wrappers; neural training was not executed. Checkpoint identity version 3 records `persistent-causal-faults-v2` and rejects pre-correction identities. Report switches remain compatible within the same training protocol. This data change requires a fresh run; format-5 inference bundles retain their compatible tensor layout.
 
 ### 2. Presence in the architecture does not guarantee selection in a trained artifact
 
@@ -142,11 +144,11 @@ The actual data preparation, normalization and corruption code was exercised wit
 | FD003 | 100 / 100 | 72 / 20 / 8 | 1 | 100 |
 | FD004 | 249 / 248 | 179 / 50 / 20 | 6 | 248 |
 
-Checks passed for disjoint fitting/validation/calibration sets, OOF inner/held-engine separation, fitting-only scaler membership, finite transformed data, 70-by-24 observation windows, 70-by-21 training masks, capped/raw target separation, one official endpoint per test engine, and exact overlap consistency of cached trajectory corruption. The future-length drift dependency was reproduced separately and remains an open finding.
+Checks passed for disjoint fitting/validation/calibration sets, OOF inner/held-engine separation, fitting-only scaler membership, finite transformed data, 70-by-24 observation windows, 70-by-21 training masks, capped/raw target separation, one official endpoint per test engine, and exact overlap consistency of cached trajectory corruption. The original future-length drift dependency was reproduced separately, then fixed in the authorized follow-up. The original JSON record describes the pre-fix audit; [CORRUPTION_PROTOCOL_VALIDATION.json](CORRUPTION_PROTOCOL_VALIDATION.json) records the follow-up validation.
 
 ## Recommended next sequence
 
-1. Resolve the simulator's future-length dependency and specify the revised corruption protocol.
+1. Use the corrected `persistent-causal-faults-v2` simulator and start a fresh run directory.
 2. In the project's real PyTorch environment, run model/gradient and checkpoint-resume checks before a new full training run.
 3. Keep the current main architecture, five-seed selection, grouped correction, validation and calibration unless a measured ablation justifies changing them.
 4. Inspect selected artifacts for actual recovery, adversarial and correction use. Report clean and corrupted accuracy separately.

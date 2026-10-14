@@ -214,13 +214,15 @@ class ResearchTraining(unittest.TestCase):
 
     def test_invalid_seed_and_numeric_settings_are_rejected(self):
         for overrides in [{"seeds": [42, 42]}, {"bootstrap_samples": 0},
-                          {"minimum_learning_rate": float("nan")}, {"detector_positive_weight_cap": .5}]:
+                          {"minimum_learning_rate": float("nan")}, {"detector_positive_weight_cap": .5},
+                          {"fault_start_horizon": -1}, {"fault_start_horizon": True},
+                          {"drift_ramp_cycles": 0}]:
             with self.subTest(overrides=overrides), self.assertRaises(ValueError):
                 validate_training_config({**self.config, **overrides})
 
     def test_reporting_switches_reuse_epochs_but_training_changes_do_not(self):
         original = pipeline_identity(self.fit, self.val, "FD001", self.config, 42)
-        # Existing format-5 checkpoints included these report-only settings.
+        # Report keys in a checkpoint may differ from the current report choices.
         legacy = {**original, "config": {**original["config"],
                   "run_matched_benchmarks": True, "run_extended_evaluation": True,
                   "benchmark_variants": DEFAULT_CONFIG["benchmark_variants"]}}
@@ -235,6 +237,16 @@ class ResearchTraining(unittest.TestCase):
                                         {**reduced, "window_stride": 1}, 42)
             with self.assertRaisesRegex(ValueError, "does not match"):
                 load_checkpoint(path, changed)
+
+    def test_old_corruption_protocol_checkpoints_require_fresh_training(self):
+        identity = pipeline_identity(self.fit, self.val, "FD001", self.config, 42)
+        legacy = {**identity, "version": 2}
+        legacy.pop("corruption_protocol")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pipeline.pt"
+            save_checkpoint(path, {"identity": legacy, "next_epoch": 3})
+            with self.assertRaisesRegex(ValueError, "corruption protocol"):
+                load_checkpoint(path, identity)
 
     def test_skipping_extended_reports_preserves_exported_weights(self):
         config = {**self.config, "maximum_batches": 1}
