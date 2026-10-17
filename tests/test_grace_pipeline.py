@@ -143,7 +143,8 @@ class PipelineInvariants(unittest.TestCase):
         damaged, altered = corrupt_trajectory(reference, np.random.default_rng(42), "drift", .5)
         self.assertTrue(altered.any())
         np.testing.assert_array_equal(altered, damaged[:, 3:] != reference[:, 3:])
-        self.assertFalse(altered[:, 1::2].any())
+        # Calibration drift is additive: zero standardized readings can drift.
+        self.assertTrue(altered[:, 1::2].any())
 
     def test_explicit_mixed_fault_evaluation_is_reproducible(self):
         reference = np.random.default_rng(8).normal(size=(120, 24)).astype(np.float32)

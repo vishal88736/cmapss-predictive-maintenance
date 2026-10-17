@@ -1,4 +1,4 @@
-"""Engine-disjoint data preparation and persistent synthetic sensor corruption."""
+"""Engine-disjoint data preparation and fitting-only sensor fault calibration."""
 
 import copy
 import hashlib
@@ -9,8 +9,7 @@ import torch
 from sklearn.cluster import KMeans
 from torch.utils.data import Dataset
 from .config import COLUMNS, SETTINGS, SENSORS
-
-FAULTS = ["intermittent", "outage", "block", "noise", "bias", "drift"]
+from .corruption import FAULTS, corrupt_trajectory
 
 
 def load_subset(data_dir, subset):
@@ -89,20 +88,28 @@ class OperatingRegimeScaler:
         # Quantized, almost-constant regime channels otherwise turn one normal
         # measurement increment into tens of standard deviations (e.g. FD002
         # sensor_10). Estimate a per-channel floor from fitting observations only.
-        floors = []
+        floors, fault_resolution = [], []
         for column in sensors.T:
             increments = np.diff(np.unique(column))
             floors.append(max(1e-6, float(increments.min())) if len(increments) else 1.)
+            # A constant channel's model normalization floor (1) is not a
+            # physical noise tolerance. Use an explicit small relative fallback.
+            fault_resolution.append(float(increments.min()) if len(increments) else
+                                    max(1e-8, abs(float(np.median(column))) * 1e-4))
         floors = np.asarray(floors)
-        means, stds = [], []
+        means, stds, within_regime_scales = [], [], []
         for r in range(k):
             rows = sensors[regimes == r]
             if len(rows) < 10:
                 rows = sensors
             means.append(rows.mean(0)); stds.append(np.maximum(rows.std(0), floors))
+            within_regime_scales.append((np.quantile(rows, .9, axis=0) - np.quantile(rows, .1, axis=0)) / 2.5631031311)
+        fault_scales = np.maximum(np.median(within_regime_scales, axis=0), fault_resolution)
         self.state = {"setting_mean": sm.tolist(), "setting_std": ss.tolist(), "centers": centers.tolist(),
                       "sensor_mean": np.asarray(means).tolist(), "sensor_std": np.asarray(stds).tolist(),
                       "sensor_scale_floor": floors.tolist(),
+                      "sensor_fault_scale": fault_scales.tolist(),
+                      "fault_scale_method": "median_regime_p10_p90_over_2.563_with_resolution_floor",
                       "fit_units": sorted(int(i) for i in frame.unit.unique())}
         return self
 
@@ -113,70 +120,6 @@ class OperatingRegimeScaler:
         regimes = ((settings[:, None] - centers[None]) ** 2).sum(-1).argmin(1)
         sensors = (frame[SENSORS].to_numpy(float) - np.asarray(s["sensor_mean"])[regimes]) / np.asarray(s["sensor_std"])[regimes]
         return np.concatenate([settings, sensors], -1).astype(np.float32), regimes
-
-
-def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=.25, progress=1.,
-                       *, start_horizon=100, drift_ramp_cycles=100, block_gap_cycles=50):
-    """Generate persistent faults without using future trajectory length.
-
-    Equal observed prefixes and RNG seeds produce equal corrupted prefixes, even
-    for mixed faults. Timing is in observed rows, which are consecutive cycles in
-    C-MAPSS. Fault labels supervise losses only; availability remains separate.
-    """
-    if isinstance(start_horizon, bool) or not isinstance(start_horizon, (int, np.integer)) or start_horizon < 0:
-        raise ValueError("start_horizon must be a nonnegative integer.")
-    if isinstance(drift_ramp_cycles, bool) or not isinstance(drift_ramp_cycles, (int, np.integer)) or drift_ramp_cycles < 1:
-        raise ValueError("drift_ramp_cycles must be a positive integer.")
-    if isinstance(block_gap_cycles, bool) or not isinstance(block_gap_cycles, (int, np.integer)) or block_gap_cycles < 1:
-        raise ValueError("block_gap_cycles must be a positive integer.")
-    x = reference.copy()
-    altered = np.zeros(x[:, 3:].shape, dtype=bool)
-    if family == "clean" or (family is None and rng.random() < clean_fraction):
-        return x, altered
-    if family == "mixed":
-        families = rng.choice(FAULTS, size=2, replace=False).tolist()
-    else:
-        families = [family] if family else rng.choice(FAULTS, size=2 if progress > .4 and rng.random() < .6 else 1, replace=False).tolist()
-    severity = float(severity if family else rng.choice([.1, .2, .3]) * max(.3, progress))
-    n, c = altered.shape
-    # A longer stochastic fault must not shift another fault's parameters/draws.
-    # Derive every stream before generating arrays whose sizes depend on n.
-    streams = [np.random.default_rng(rng.integers(0, np.iinfo(np.int64).max)) for _ in families]
-    for fault, fault_rng in zip(families, streams):
-        channels = fault_rng.choice(c, max(1, round(c * severity)), replace=False)
-        start = int(fault_rng.integers(0, start_horizon + 1))
-        if fault == "intermittent":
-            mask = fault_rng.random((n, c)) < severity
-            x[:, 3:][mask] = np.nan; altered |= mask
-        elif fault == "outage":
-            x[start:, 3 + channels] = np.nan; altered[start:, channels] = True
-        elif fault == "block":
-            span = max(5, int(100 * severity))
-            # Recurring temporary losses remain possible late in a trajectory.
-            # Every event is generated in order, independently of its final length.
-            while start < n:
-                x[start:start + span, 3 + channels] = np.nan
-                gap = int(fault_rng.integers(max(1, block_gap_cycles // 2), block_gap_cycles + 1))
-                start += span + gap
-        elif fault == "noise":
-            sigma = severity / 6  # .1/.2/.3 correspond approximately to A's mild noise range.
-            x[:, 3 + channels] += fault_rng.normal(0, sigma, (n, len(channels)))
-            altered[:, channels] = True
-        elif fault == "bias":
-            offsets = fault_rng.uniform(-2.5 * severity, 2.5 * severity, len(channels))
-            x[start:, 3 + channels] += offsets; altered[start:, channels] = True
-        elif fault == "drift":
-            slopes = fault_rng.uniform(-severity, severity, len(channels))
-            elapsed = np.arange(max(0, n - start), dtype=np.float32)
-            ramp = np.minimum(elapsed / drift_ramp_cycles, 1.)[:, None]
-            x[start:, 3 + channels] *= 1 + ramp * slopes; altered[start:, channels] = True
-        else:
-            raise ValueError(f"Unknown fault family: {fault}")
-    # Multiplicative drift cannot alter an exactly zero standardized reading,
-    # and its first ramp point is unchanged. Do not teach the detector to flag
-    # measurements that remain identical to their reference.
-    altered = x[:, 3:] != reference[:, 3:]
-    return x, altered
 
 
 def make_window(values, end, length):
@@ -190,7 +133,8 @@ def make_window(values, end, length):
 class WindowDataset(Dataset):
     def __init__(self, frame, scaler, config, mode="train", seed=42, family=None, severity=.2, truths=None):
         self.config, self.seed, self.family, self.severity = config, int(seed), family, severity
-        self.epoch, self.progress, self.cache = 0, 1., {}
+        self.epoch, self.progress, self.cache, self.fault_metadata = 0, 1., {}, {}
+        self.fault_profile = getattr(scaler, "state", None)
         self.engines, self.samples = [], []
         rng = np.random.default_rng(seed)
         for unit, group in frame.groupby("unit", sort=True):
@@ -216,7 +160,7 @@ class WindowDataset(Dataset):
             self.samples = [self.samples[i] for i in sorted(rng.choice(len(self.samples), config["maximum_windows"], replace=False))]
 
     def set_epoch(self, epoch, progress=1.):
-        self.epoch, self.progress, self.cache = int(epoch), progress, {}
+        self.epoch, self.progress, self.cache, self.fault_metadata = int(epoch), progress, {}, {}
 
     def __len__(self):
         return len(self.samples)
@@ -226,11 +170,17 @@ class WindowDataset(Dataset):
         engine = self.engines[engine_index]
         if engine_index not in self.cache:
             rng = np.random.default_rng(np.random.SeedSequence([self.seed, self.epoch, engine["unit"]]))
-            self.cache[engine_index] = corrupt_trajectory(
+            damaged, labels, metadata = corrupt_trajectory(
                 engine["values"], rng, self.family, self.severity, self.config["clean_fraction"], self.progress,
                 start_horizon=self.config.get("fault_start_horizon", 100),
                 drift_ramp_cycles=self.config.get("drift_ramp_cycles", 100),
-                block_gap_cycles=self.config.get("block_gap_cycles", 50))
+                block_gap_cycles=self.config.get("block_gap_cycles", 50),
+                noise_autocorrelation=self.config.get("fault_noise_autocorrelation", .9),
+                transition_gain=self.config.get("fault_transition_gain", 1.),
+                intermittent_mean_burst=self.config.get("intermittent_mean_burst", 4),
+                profile=self.fault_profile, regimes=engine["regimes"], return_metadata=True)
+            self.cache[engine_index] = damaged, labels
+            self.fault_metadata[engine_index] = metadata
         corrupt, altered = self.cache[engine_index]
         length = self.config["sequence_length"]
         reference, valid = make_window(engine["values"], end, length)

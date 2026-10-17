@@ -108,17 +108,25 @@ Format-3/4 checkpoints and bundles cannot be reused with the
 improved format-5 pipeline; retrain in a fresh directory. The interrupted October
 8 run and its notebook outputs were removed during the October 11 audit.
 
-The corrected simulator uses protocol `persistent-causal-faults-v3`. Fault onset is
-sampled at an absolute observed offset from 0 through `fault_start_horizon` (100
-by default). Drift ramps over `drift_ramp_cycles` (100 by default), then holds its
-sampled gain. Fault streams are independent, including mixed faults, so extending
-an engine's unseen future cannot change its already corrupted observations.
-Temporary block faults recur with gaps up to `block_gap_cycles` (50); they no longer
-expire permanently in the first 120 cycles. Fault reports include affected-endpoint
+The simulator uses protocol `structured-sensor-faults-v4`: burst dropouts,
+persistent outage, recurring blocks, correlated noise, additive calibration bias/drift,
+and stuck sensors. Each scenario affects a related measurement domain. Settings and
+demanded speeds stay intact. Raw-unit amplitudes use within-regime fitting-engine
+variation and resolution floors; these are empirical simulation scales, not sensor
+specifications. Noise has temporal/common-source memory, and observed operating-regime
+transitions raise noise amplitude and burst-dropout risk. Mixed scenarios share a
+domain, channels and onset. See [the mechanisms, equations and assumptions](docs/STRUCTURED_SENSOR_FAULTS.md).
+
+Fault onset uses absolute observed offsets from 0 through `fault_start_horizon`
+(100 by default). Drift ramps over `drift_ramp_cycles` (100), then holds its
+additive raw-unit offset. Stuck readings remain fixed in physical units even when
+regimes change. Independent mechanism streams preserve corrupted prefixes when
+unseen future observations are appended. Block faults recur with gaps up to
+`block_gap_cycles` (50). Fault reports include affected-endpoint
 and damaged-entry fractions plus separate active-fault metrics. Validation uses fixed
 mixed faults independently of the training clean fraction and selects on clean/active
 fault RMSE. Clean-reference supervision, a ten-epoch curriculum, and a 1% clean RMSE
-guard protect the predictor. Use a fresh directory: v2 checkpoints cannot resume v3.
+guard protect the predictor. Use a fresh directory: v2/v3 checkpoints cannot resume v4.
 The observation rows in C-MAPSS represent consecutive cycles.
 
 This changes training data. Start a fresh run directory for checkpoints created

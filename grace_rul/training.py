@@ -277,6 +277,13 @@ def validate_training_config(config):
     horizon = config["fault_start_horizon"]
     if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 0:
         raise ValueError("fault_start_horizon must be a nonnegative integer.")
+    burst = config["intermittent_mean_burst"]
+    if isinstance(burst, bool) or not isinstance(burst, int) or burst < 2:
+        raise ValueError("intermittent_mean_burst must be an integer >= 2.")
+    if not np.isfinite(config["fault_noise_autocorrelation"]) or not 0 <= config["fault_noise_autocorrelation"] < 1:
+        raise ValueError("fault_noise_autocorrelation must be finite and in [0, 1).")
+    if not np.isfinite(config["fault_transition_gain"]) or not 0 <= config["fault_transition_gain"] <= 3:
+        raise ValueError("fault_transition_gain must be finite and in [0, 3].")
     for name in [k for k in config if k.endswith("_loss_weight")] + ["max_clean_rmse_increase", "max_intact_repair_rmse", "max_reconstruction_rmse"]:
         if not np.isfinite(config[name]) or config[name] < 0:
             raise ValueError(f"{name} must be finite and nonnegative.")

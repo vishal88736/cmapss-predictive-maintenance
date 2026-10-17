@@ -49,16 +49,27 @@ the WGAN comparator keeps a positive adversarial weight. Controlled GRACE ablati
 retain the selected primary settings. This modest
 search does not establish an optimal configuration.
 
-Sensor corruption uses `persistent-causal-faults-v3`. Onsets are sampled from the
-absolute observed offsets 0 through `fault_start_horizon` (default 100), independently
-of eventual failure or total trajectory length. Drift grows with elapsed cycles
-after onset over `drift_ramp_cycles` (default 100), then stays at its sampled gain.
-Missing blocks recur after gaps between half of `block_gap_cycles` and that maximum
-(default 50 cycles); individual blocks retain their duration. A fault whose initial
-onset lies beyond the observed history has no effect
-on that history. Per-fault random streams keep mixed faults independent of the
-number of random samples drawn by another fault. Overlapping windows share cached
-trajectory faults.
+Sensor corruption uses `structured-sensor-faults-v4`. Related measurement domains
+replace arbitrary channel sets; speed commands and settings are preserved. Added
+noise is temporally correlated with common/individual innovations. Bursty missingness
+shares a contact-loss state within a domain. Observed regime transitions increase
+noise amplitude and burst-entry risk. Bias/drift are additive physical-unit offsets;
+stuck sensors hold a physical reading across changes in regime. Mixed faults share
+channels/onset and combine contact-noise/dropout, calibration-bias/drift, or acquisition
+freeze/block mechanisms. These groupings and parameters are simulation assumptions.
+The fitting-only scaler saves `sensor_fault_scale`: median within-regime p10–p90
+range divided by 2.563, floored by observed resolution or an explicit constant-channel
+fallback. This is not a measured sensor error specification. Full equations and
+limitations are in [STRUCTURED_SENSOR_FAULTS.md](STRUCTURED_SENSOR_FAULTS.md).
+
+Onsets are sampled from absolute observed offsets 0 through `fault_start_horizon`
+(100), independently of failure time or total trajectory length. Drift grows over
+`drift_ramp_cycles` (100), then stays at its sampled additive offset. Missing blocks
+recur after gaps between half of `block_gap_cycles` and that maximum (50 cycles).
+An onset beyond observed history has no effect. Independent mechanism streams
+preserve prefixes in mixed scenarios; overlapping windows share cached faults.
+`fault_noise_autocorrelation` (.9), `fault_transition_gain` (1), and
+`intermittent_mean_burst` (4 cycles) are configurable and included in training identity.
 
 The timing controls can be changed in notebook configuration or a CLI JSON config.
 This is a revised training-data protocol: pre-correction checkpoints cannot resume

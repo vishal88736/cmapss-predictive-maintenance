@@ -90,11 +90,18 @@ Partition and validation/evaluation corruption seeds are fixed across training s
 three prefixes per engine; correction uses six; calibration retains one independent
 endpoint per engine. Full runs train separate models for each subset. Seeds are selected using validation
 performance, never test scores. Training explicitly requests `CONFIG['device'] = 'cuda'`.
-Fault starts use absolute observed offsets up to `CONFIG['fault_start_horizon']`;
-drift ramps over `CONFIG['drift_ramp_cycles']`, independently of final trajectory
-length. Mixed faults use independent random streams. Defaults are 100 cycles for
-both controls. Temporary blocks recur with independently sampled gaps up to
-`block_gap_cycles` (50). Reports separate active faults from unaffected windows.
+Protocol `structured-sensor-faults-v4` selects a related measurement domain, protects
+operating settings and demanded speeds, and uses raw-unit amplitude scales estimated
+only on fitting engines. Fault starts use absolute observed offsets up to
+`CONFIG['fault_start_horizon']`; additive calibration drift ramps over
+`CONFIG['drift_ramp_cycles']`. Defaults are 100 cycles for both controls.
+Noise has temporal memory and a shared component within the selected domain;
+observed regime changes raise its amplitude and the burst-dropout entry rate.
+Stuck sensors hold physical readings across regime changes. Mixed scenarios combine
+related mechanisms on the same channels and onset. Each mechanism has an independent
+random stream. Temporary blocks recur with gaps up to `block_gap_cycles` (50).
+These are structured sensor-error simulations; measured field-fault parameters are
+unavailable. Reports separate active faults from unaffected windows.
 Selection averages clean and active-mixed-fault RMSE; changing the training clean
 fraction does not change the fixed validation faults. Checkpoints from earlier
 simulators require a fresh run directory.
@@ -162,8 +169,12 @@ md("""
 
 Persistent faults are applied to reference trajectories before making windows, so
 overlapping windows share the same fault realization. Reference C-MAPSS measurements
-already contain simulation noise. Additional synthetic faults include intermittent loss,
-channel outage, missing blocks, Gaussian noise, bias, drift, and mixed families.
+already contain simulation noise and engine degradation. Added sensor errors include
+bursty contact loss, channel outage, recurring telemetry blocks, correlated measurement
+noise, calibration bias/drift, and stuck readings. Channel groups are documented
+measurement-domain hypotheses, not verified C-MAPSS wiring. Severity controls a
+mechanism's magnitude/duration and domain coverage, not a global percentage of bad
+entries. The audit below shows actual changes. Plots use physical sensor units.
 Unmodified examples remain in training. The damage mask is a target, not a model input.
 """)
 code("""
@@ -173,17 +184,34 @@ partition = split_engines(train, CONFIG['split_seed'], CONFIG['maximum_engines']
                           CONFIG['validation_fraction'], CONFIG['calibration_fraction_of_training'])
 fit = train[train.unit.isin(partition['fit'])]
 scaler = OperatingRegimeScaler().fit(fit, subset, CONFIG['split_seed'])
-# Make this illustration visibly faulty; training retains its configured onset range.
+# Start the illustrations immediately; training retains its configured onset range.
 DEMO_CONFIG = {**CONFIG, 'fault_start_horizon': 0}
-demo = WindowDataset(fit, scaler, DEMO_CONFIG, mode='correction', family='bias', seed=42)[0]
-affected = np.flatnonzero(demo['altered'].any(0).numpy())
-j = int(affected[0]) if len(affected) else 2
-valid = demo['valid'].numpy()
-plt.figure(figsize=(11, 3))
-plt.plot(demo['reference'][valid, 3+j], label='Reference')
-plt.plot(demo['x'][valid, 3+j], label='Corrupted', linestyle='--')
-plt.title(f'{subset}: introduced bias, {SENSORS[j]} ({SENSOR_NAMES[j]})')
-plt.xlabel('Observed window position'); plt.ylabel('Normalized reading'); plt.legend(); plt.tight_layout(); plt.show()
+fig, axes = plt.subplots(4, 2, figsize=(14, 12))
+fault_audit = []
+for family, ax in zip(['intermittent', 'outage', 'block', 'noise', 'bias', 'drift', 'stuck', 'mixed'], axes.flat):
+    demo_data = WindowDataset(fit, scaler, DEMO_CONFIG, mode='correction', family=family, seed=42)
+    demo = demo_data[0]
+    engine_index, end = demo_data.samples[0]
+    metadata = demo_data.fault_metadata[engine_index]
+    affected = np.flatnonzero(demo['altered'].any(0).numpy())
+    j = int(affected[0]) if len(affected) else SENSORS.index(metadata['channels'][0])
+    valid = demo['valid'].numpy()
+    regimes = demo_data.engines[engine_index]['regimes'][max(0, end-CONFIG['sequence_length']+1):end+1]
+    mu = np.asarray(scaler.state['sensor_mean'])[regimes, j]
+    sd = np.asarray(scaler.state['sensor_std'])[regimes, j]
+    for key, label, style in [('reference', 'Reference', '-'), ('x', 'Sensor fault', '--')]:
+        ax.plot(demo[key].numpy()[valid, 3+j] * sd + mu, style, label=label)
+    missing = ~np.isfinite(demo['x'].numpy()[valid, 3+j])
+    if missing.any():
+        ax.scatter(np.flatnonzero(missing), (demo['reference'].numpy()[valid, 3+j] * sd + mu)[missing],
+                   marker='x', color='red', s=15, label='Unavailable')
+    ax.set_title(f'{family}: {metadata["domain"]}, {SENSOR_NAMES[j]}')
+    ax.set_xlabel('Observed window position'); ax.set_ylabel('Physical sensor reading'); ax.legend(fontsize=8)
+    fault_audit.append({'family': family, 'scenario': metadata['scenario'], 'domain': metadata['domain'],
+                       'channels': ', '.join(metadata['channels']), 'onset': metadata['onset_observed_offset'],
+                       'window_changed_fraction': float(demo['altered'].numpy()[valid].mean())})
+plt.tight_layout(); plt.show()
+display(pd.DataFrame(fault_audit))
 """)
 md("""
 ## Train and export the complete pipeline
@@ -208,7 +236,7 @@ epochs (including OOF models) are saved in the printed run directory's `checkpoi
 To resume after interrupting, restart the kernel and rerun setup/configuration with
 the same settings, then pass that run directory as `output_dir` to `run_experiment`.
 Completed upstream models load from checkpoints; correction and evaluation rerun.
-The corrected `persistent-causal-faults-v3` simulator has a new training identity;
+The corrected `structured-sensor-faults-v4` simulator has a new training identity;
 pre-correction checkpoints require a fresh directory even if their bundle format is 5.
 Older format-3/4 runs are incompatible with the residual-recovery format-5 pipeline and
 require fresh training. The interrupted October 8 artifacts have been removed.

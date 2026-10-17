@@ -333,7 +333,8 @@ class ResearchTraining(unittest.TestCase):
         for overrides in [{"seeds": [42, 42]}, {"bootstrap_samples": 0},
                           {"minimum_learning_rate": float("nan")}, {"detector_positive_weight_cap": .5},
                           {"fault_start_horizon": -1}, {"fault_start_horizon": True},
-                          {"drift_ramp_cycles": 0}]:
+                          {"drift_ramp_cycles": 0}, {"fault_noise_autocorrelation": 1.},
+                          {"fault_transition_gain": -1.}, {"intermittent_mean_burst": 1}]:
             with self.subTest(overrides=overrides), self.assertRaises(ValueError):
                 validate_training_config({**self.config, **overrides})
 

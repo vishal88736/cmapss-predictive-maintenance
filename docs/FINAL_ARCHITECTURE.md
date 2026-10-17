@@ -164,22 +164,40 @@ All trajectory rows contain 26 columns: unit, cycle, three settings, and 21 sens
 
 ## 4. Corruption design
 
-The primary fault families come from the three papers:
+The sensor-failure experiment adapts the paper families using structured behavioral
+models. Current protocol `structured-sensor-faults-v4` uses the following mechanisms;
+its equations, raw-unit scales and limitations are documented in
+[STRUCTURED_SENSOR_FAULTS.md](STRUCTURED_SENSOR_FAULTS.md).
 
 | Family | Initial training range | How recovery is challenged |
 | --- | --- | --- |
-| Intermittent loss | 10%, 20%, 30% entry missingness | Sparse unavailable readings |
-| Whole-channel outage | Approximately 10%, 20%, 30% of sensor channels | Loss of an entire sensor's window history |
-| Continuous missing block | 5–30 cycles during training curriculum, on selected channels | Structured communication loss derived from B's outage setting |
-| Gaussian measurement noise | Standard deviation 0.01, 0.03, 0.05 after normalization | A's noise robustness setting |
-| Additive bias | Per-channel offset sampled in [−0.5, +0.5] | Finite but incorrect values |
-| Multiplicative drift | Drift slope sampled in [−0.3, +0.3] over the fault span | Slowly changing sensor sensitivity |
+| Intermittent loss | Bursts on a related domain, mean four cycles | Common contact/acquisition loss with intact intervals |
+| Whole-channel outage | Related channels unavailable after onset | Persistent sensor failure |
+| Continuous missing block | Recurring 5–30 cycle blocks during curriculum | Interrupted telemetry |
+| Correlated measurement noise | AR(1), rho .9; raw sigma = severity × fitting scale | Temporal memory, common/individual innovations, transition stress |
+| Additive bias | Raw offset bounded by 2.5 × severity × fitting scale | Persistent calibration error |
+| Additive drift | Offset ramps over 100 observed cycles by default | Calibration creep, including at zero normalized values |
+| Stuck | Hold raw sensor reading at onset | Stale acquisition, including across changes in operating regime |
 
-Log the actual number of affected channels: rounding a percentage of 21 sensors changes the realized rate. Missing-channel rate, missing-entry rate, noise magnitude, and drift slope are different severity measures and should never be pooled into one unlabeled “corruption percentage.”
+Severity is a dimensionless mechanism control, not a global corrupted-entry percentage.
+Log actual affected channels, changed entries and active endpoints. Sensor-domain
+groups are measurement-based hypotheses rather than verified C-MAPSS wiring.
 
-Maintain 25% unmodified training examples to protect reference-data behavior. For the remaining 75%, begin with individual mild faults, then introduce stronger faults and two-family combinations. Protocol `persistent-causal-faults-v2` samples onset at an absolute observed offset from 0 through `fault_start_horizon` (default 100), and ramps drift using elapsed cycles over `drift_ramp_cycles` (default 100), clipping its gain after that duration. These controls do not depend on total trajectory length or RUL. Per-fault random streams preserve the corrupted prefix when unseen future observations are appended, including mixed noise/missingness faults. This resolves the simulator dependency reproduced in the 14 October audit; see [the integration audit](INTEGRATION_AUDIT_2026-10-14.md). Pre-correction training checkpoints require a fresh run under the new protocol. Include a separately labeled stress experiment where failures concentrate near end of life or affect the important thermodynamic sensors identified in Paper A.
+Maintain 25% unmodified training examples to protect reference-data behavior. For the
+remaining 75%, begin with individual mild faults, then introduce stronger faults and
+related two-family combinations. Absolute onsets and fixed drift durations remain
+independent of trajectory length/RUL; independent mechanism streams preserve corrupted
+prefixes. Mixed cases share channels/onset and represent connector noise/dropout,
+calibration bias/drift, or acquisition freeze/blocks. Fitting-only profiles define
+raw-unit amplitudes. Use a fresh v4 training directory.
 
-Validation and test corruption have saved, deterministic seeds. Full-mode test cases include 40% and 50% severity, longer outages, larger noise/bias/drift, and explicit two-family mixed faults. The mixed combinations are sampled from the same families used during training; they are not held-out fault combinations. A separate experiment withholding specific combinations remains proposed. Reserve extrapolation cases for evaluation; do not tune on their results. Damage labels mark entries actually changed by corruption, including missing values; a zero-valued channel unchanged by multiplicative drift is not labeled faulty.
+Validation and test corruption have deterministic seeds. Full-mode cases include
+severity .4 and .5 and the same related mixed scenarios used in training; these
+are not held-out combinations. A separate experiment withholding combinations
+remains proposed. Reserve extrapolation cases for evaluation. Damage labels mark
+only entries actually changed, including missing values; a stuck sensor matching
+an unchanging reference is not labeled changed. Existing simulation noise and
+engine degradation remain in the reference trajectories.
 
 Do not corrupt RUL labels or operating settings in the primary sensor-recovery experiment. Missing settings are a separate unsupported-input condition until explicitly trained and tested.
 

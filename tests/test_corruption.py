@@ -1,5 +1,6 @@
 """Regression checks for causal, persistent synthetic sensor faults."""
 
+from copy import deepcopy
 from types import SimpleNamespace
 import unittest
 
@@ -7,10 +8,28 @@ import numpy as np
 import pandas as pd
 
 from grace_rul.config import COLUMNS, DEFAULT_CONFIG, FEATURE_COLUMNS
-from grace_rul.data import FAULTS, WindowDataset, corrupt_trajectory, select_background_indices, window_view
+from grace_rul.data import FAULTS, OperatingRegimeScaler, WindowDataset, corrupt_trajectory, select_background_indices, window_view
 
 
 class CausalCorruption(unittest.TestCase):
+    def test_physical_fault_scales_are_fitted_only_and_constant_channels_have_small_floors(self):
+        frame = pd.DataFrame(np.ones((80, len(COLUMNS))), columns=COLUMNS)
+        frame["unit"], frame["cycle"] = 1, np.arange(1, 81)
+        frame["sensor_1"] = 500.
+        frame["sensor_2"] = 600 + np.arange(80) * .02
+        scaler = OperatingRegimeScaler().fit(frame, "FD001", 42)
+        before = deepcopy(scaler.state)
+        self.assertAlmostEqual(scaler.state["sensor_fault_scale"][0], .05)
+        self.assertAlmostEqual(scaler.state["sensor_scale_floor"][0], 1.)
+        held = frame.copy()
+        held["unit"], held["sensor_2"] = 999, 1e9
+        scaler.transform(held)
+        self.assertEqual(scaler.state, before)
+        self.assertEqual(scaler.state["fit_units"], [1])
+        data = WindowDataset(frame, scaler, DEFAULT_CONFIG, family="noise")
+        data[0]
+        self.assertEqual(data.fault_metadata[0]["scale_source"], "fitting_engines")
+
     def test_block_faults_recur_in_late_observed_history(self):
         reference = np.ones((600, 24), dtype=np.float32)
         for seed in range(12):
@@ -45,11 +64,11 @@ class CausalCorruption(unittest.TestCase):
         final_change = damaged[10, 3 + channels] - 1.
         np.testing.assert_allclose(damaged[5, 3 + channels] - 1., .5 * final_change, rtol=0, atol=1e-7)
         np.testing.assert_array_equal(damaged[10:, 3 + channels], np.tile(damaged[10, 3 + channels], (70, 1)))
-        self.assertTrue((np.abs(final_change) <= .3 + 1e-7).all())
+        self.assertTrue((np.abs(final_change) <= 2.5 * .3 + 1e-7).all())
 
     def test_onset_after_observed_history_does_not_move_to_its_end(self):
         reference = np.ones((3, 24), dtype=np.float32)
-        for family in ["outage", "block", "bias", "drift"]:
+        for family in FAULTS:
             with self.subTest(family=family):
                 damaged, labels = corrupt_trajectory(reference, np.random.default_rng(42), family,
                                                      start_horizon=1_000_000)
@@ -57,7 +76,7 @@ class CausalCorruption(unittest.TestCase):
                 self.assertFalse(labels.any())
 
     def test_changed_entry_labels_and_settings_are_preserved(self):
-        reference = np.ones((80, 24), dtype=np.float32)
+        reference = np.tile(np.arange(80, dtype=np.float32)[:, None], (1, 24))
         reference[:, 3::2] = 0.
         for family in [*FAULTS, "mixed", "clean"]:
             with self.subTest(family=family):
@@ -68,9 +87,7 @@ class CausalCorruption(unittest.TestCase):
                 np.testing.assert_array_equal(damaged[:, 3:][~labels], reference[:, 3:][~labels])
                 if family == "clean":
                     self.assertFalse(labels.any())
-                elif family == "drift":
-                    self.assertFalse(labels[:, ::2].any())
-                else:
+                elif family != "stuck":
                     self.assertTrue(labels.any())
 
     def test_dataset_prefix_inputs_do_not_depend_on_future_rul(self):
