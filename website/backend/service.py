@@ -111,7 +111,7 @@ class InferenceService:
         with self.lock:
             root = self.path.parent if self.bundle else None
             tables = {}
-            for name in ["test_metrics", "training_history", "correction_history", "robustness_summary", "ablation_metrics", "seed_summary", "cross_validation_metrics", "cross_validation_summary", "test_seed_summary", "validation_search", "benchmark_summary", "benchmark_comparison", "superiority_checks", "benchmark_training_audit"]:
+            for name in ["test_metrics", "training_history", "correction_history", "robustness_summary", "ablation_metrics", "seed_summary", "cross_validation_metrics", "cross_validation_summary", "test_seed_summary", "validation_search", "benchmark_summary", "benchmark_comparison", "benchmark_active_comparison", "superiority_checks", "benchmark_training_audit", "background_audit"]:
                 try:
                     path = root / f"{name}.csv" if root else None
                     tables[name] = pd.read_csv(path).replace([np.inf, -np.inf], np.nan).to_dict("records") if path and path.is_file() else []
@@ -132,12 +132,12 @@ class InferenceService:
             if unknown:
                 raise InputError("The connected model does not support: " + ", ".join(sorted(unknown)))
             started, engines = time.perf_counter(), []
-            length = self.config["sequence_length"]
             groups = list(frame.groupby(["subset", "unit"], sort=True))
             samples = min(8, max(1, 2048 // len(groups)))
             for (subset, unit), group in groups:
                 item = self.loaded[subset]
                 model, scaler, entry = item["model"], item["scaler"], item["entry"]
+                length = model.config["sequence_length"]
                 values, regimes = scaler.transform(group)
                 ends = np.unique(np.linspace(min(19, len(group) - 1), len(group) - 1, min(samples, len(group)), dtype=int))
                 pairs = [make_window(values, int(end), length) for end in ends]
@@ -211,7 +211,7 @@ class InferenceService:
                 raise InputError("Sensor number must be between 1 and 21.")
             item = self.loaded[subset]
             normalized, _ = item["scaler"].transform(group)
-            x, valid = make_window(normalized, len(group) - 1, self.config["sequence_length"])
+            x, valid = make_window(normalized, len(group) - 1, item["model"].config["sequence_length"])
             if sensor is None:
                 with torch.no_grad():
                     out = item["model"](torch.tensor(x[None], device=self.device), torch.tensor(valid[None], device=self.device))

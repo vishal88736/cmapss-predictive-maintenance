@@ -1,5 +1,6 @@
 """Engine-disjoint data preparation and persistent synthetic sensor corruption."""
 
+import copy
 import hashlib
 from pathlib import Path
 import numpy as np
@@ -115,7 +116,7 @@ class OperatingRegimeScaler:
 
 
 def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=.25, progress=1.,
-                       *, start_horizon=100, drift_ramp_cycles=100):
+                       *, start_horizon=100, drift_ramp_cycles=100, block_gap_cycles=50):
     """Generate persistent faults without using future trajectory length.
 
     Equal observed prefixes and RNG seeds produce equal corrupted prefixes, even
@@ -126,6 +127,8 @@ def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=
         raise ValueError("start_horizon must be a nonnegative integer.")
     if isinstance(drift_ramp_cycles, bool) or not isinstance(drift_ramp_cycles, (int, np.integer)) or drift_ramp_cycles < 1:
         raise ValueError("drift_ramp_cycles must be a positive integer.")
+    if isinstance(block_gap_cycles, bool) or not isinstance(block_gap_cycles, (int, np.integer)) or block_gap_cycles < 1:
+        raise ValueError("block_gap_cycles must be a positive integer.")
     x = reference.copy()
     altered = np.zeros(x[:, 3:].shape, dtype=bool)
     if family == "clean" or (family is None and rng.random() < clean_fraction):
@@ -149,7 +152,12 @@ def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=
             x[start:, 3 + channels] = np.nan; altered[start:, channels] = True
         elif fault == "block":
             span = max(5, int(100 * severity))
-            x[start:start + span, 3 + channels] = np.nan; altered[start:start + span, channels] = True
+            # Recurring temporary losses remain possible late in a trajectory.
+            # Every event is generated in order, independently of its final length.
+            while start < n:
+                x[start:start + span, 3 + channels] = np.nan
+                gap = int(fault_rng.integers(max(1, block_gap_cycles // 2), block_gap_cycles + 1))
+                start += span + gap
         elif fault == "noise":
             sigma = severity / 6  # .1/.2/.3 correspond approximately to A's mild noise range.
             x[:, 3 + channels] += fault_rng.normal(0, sigma, (n, len(channels)))
@@ -186,11 +194,12 @@ class WindowDataset(Dataset):
         self.engines, self.samples = [], []
         rng = np.random.default_rng(seed)
         for unit, group in frame.groupby("unit", sort=True):
-            values, _ = scaler.transform(group)
+            values, regimes = scaler.transform(group)
             cycles = group.cycle.to_numpy()
             y = (truths[int(unit)] + cycles[-1] - cycles) if truths is not None else cycles[-1] - cycles
             engine_index = len(self.engines)
-            self.engines.append({"unit": int(unit), "values": values, "cycles": cycles, "targets": y.astype(np.float32)})
+            self.engines.append({"unit": int(unit), "values": values, "cycles": cycles,
+                                 "regimes": regimes, "targets": y.astype(np.float32)})
             if mode == "train":
                 ends = np.unique(np.r_[np.arange(0, len(values), config["window_stride"]), len(values) - 1])
             elif mode == "test":
@@ -220,7 +229,8 @@ class WindowDataset(Dataset):
             self.cache[engine_index] = corrupt_trajectory(
                 engine["values"], rng, self.family, self.severity, self.config["clean_fraction"], self.progress,
                 start_horizon=self.config.get("fault_start_horizon", 100),
-                drift_ramp_cycles=self.config.get("drift_ramp_cycles", 100))
+                drift_ramp_cycles=self.config.get("drift_ramp_cycles", 100),
+                block_gap_cycles=self.config.get("block_gap_cycles", 50))
         corrupt, altered = self.cache[engine_index]
         length = self.config["sequence_length"]
         reference, valid = make_window(engine["values"], end, length)
@@ -231,3 +241,53 @@ class WindowDataset(Dataset):
                 "valid": torch.from_numpy(valid), "altered": torch.from_numpy(labels).bool(),
                 "target": torch.tensor(min(self.config["train_rul_cap"], raw_target), dtype=torch.float32),
                 "raw_target": torch.tensor(raw_target, dtype=torch.float32), "unit": engine["unit"], "cycle": int(engine["cycles"][end])}
+
+
+def select_background_indices(dataset, size, seed):
+    """Balance fitting references over regimes/life stages and prefer new engines.
+
+    This selects indices only; it does not inspect test data or model predictions.
+    """
+    if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+        raise ValueError("Background size must be a positive integer.")
+    groups, metadata = {}, {}
+    for index in np.random.default_rng(seed).permutation(len(dataset)).tolist():
+        engine_index, end = dataset.samples[index]
+        engine = dataset.engines[engine_index]
+        regime = int(engine["regimes"][end]) if engine["regimes"] is not None else 0
+        target = min(float(engine["targets"][end]), dataset.config["train_rul_cap"])
+        stage = min(3, int(3 * target / dataset.config["target_scale"]))
+        groups.setdefault((regime, stage), []).append(index)
+        metadata[index] = {"unit": engine["unit"], "cycle": int(engine["cycles"][end]),
+                           "regime": regime, "life_stage": stage, "capped_target": target}
+    selected, engines = [], set()
+    strata = sorted(groups)
+    # Exhaust distinct engines before accepting another example from one engine.
+    for prefer_new in [True, False]:
+        while len(selected) < min(size, len(dataset)):
+            added = False
+            for stratum in strata:
+                candidates = groups[stratum]
+                position = next((i for i, idx in enumerate(candidates)
+                                 if not prefer_new or metadata[idx]["unit"] not in engines), None)
+                if position is None:
+                    continue
+                index = candidates.pop(position)
+                selected.append(index); engines.add(metadata[index]["unit"])
+                added = True
+                if len(selected) == min(size, len(dataset)):
+                    break
+            if not added:
+                break
+    return selected, [metadata[index] for index in selected]
+
+
+def window_view(dataset, length):
+    """Change observed context while sharing endpoints and cached trajectory faults."""
+    if isinstance(length, bool) or not isinstance(length, int) or length < 1:
+        raise ValueError("Window length must be a positive integer.")
+    if length == dataset.config["sequence_length"]:
+        return dataset
+    view = copy.copy(dataset)
+    view.config = {**dataset.config, "sequence_length": length}
+    return view

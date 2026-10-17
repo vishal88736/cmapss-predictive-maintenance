@@ -89,24 +89,28 @@ class RULPredictor(nn.Module):
 
     def forward(self, repaired, settings, mask, weights, observed, valid, branch="both", equal_fusion=False):
         x = torch.cat([repaired, settings, mask, weights], -1) * valid.unsqueeze(-1)
-        n = min(self.config["local_length"], x.shape[1])
-        local_x, local_valid = x[:, -n:], valid[:, -n:]
-        conv = torch.cat([F.relu(self.conv3(local_x.transpose(1, 2))), F.relu(self.conv5(local_x.transpose(1, 2)))], 1).transpose(1, 2)
-        local = self.local_projection(last_valid(masked_rnn(self.gru, conv, local_valid), local_valid))
-        embedding = self.input_projection(x) + self.position[:, :x.shape[1]]
-        global_features = last_valid(self.transformer(embedding, src_key_padding_mask=~valid), valid)
+        local = global_features = x.new_zeros((len(x), self.config["transformer_dim"]))
+        if branch != "global":
+            n = min(self.config["local_length"], x.shape[1])
+            local_x, local_valid = x[:, -n:], valid[:, -n:]
+            conv = torch.cat([F.relu(self.conv3(local_x.transpose(1, 2))), F.relu(self.conv5(local_x.transpose(1, 2)))], 1).transpose(1, 2)
+            local = self.local_projection(last_valid(masked_rnn(self.gru, conv, local_valid), local_valid))
+        if branch != "local":
+            embedding = self.input_projection(x) + self.position[:, :x.shape[1]]
+            global_features = last_valid(self.transformer(embedding, src_key_padding_mask=~valid), valid)
         quality = torch.cat([valid_mean(mask, valid), valid_mean(weights, valid),
             valid_mean((repaired - observed).abs(), valid), valid.float().mean(1, keepdim=True)], -1)
-        gates = self.gate(torch.cat([local, global_features, quality], -1)).softmax(-1)
-        if equal_fusion:
-            gates = torch.full_like(gates, 0.5)
         if branch in {"local", "global"}:
-            gates = gates.new_tensor([1., 0.] if branch == "local" else [0., 1.]).expand(len(x), -1)
+            gates = x.new_tensor([1., 0.] if branch == "local" else [0., 1.]).expand(len(x), -1)
+        elif equal_fusion:
+            gates = x.new_full((len(x), 2), 0.5)
+        else:
+            gates = self.gate(torch.cat([local, global_features, quality], -1)).softmax(-1)
         fused = gates[:, :1] * local + gates[:, 1:] * global_features
         scale = self.config["target_scale"]
         return {"base": F.softplus(self.head(torch.cat([fused, quality], -1))).flatten() * scale,
-                "local_prediction": F.softplus(self.local_head(local)).flatten() * scale,
-                "global_prediction": F.softplus(self.global_head(global_features)).flatten() * scale,
+                "local_prediction": F.softplus(self.local_head(local)).flatten() * scale if branch != "global" else x.new_zeros((len(x),)),
+                "global_prediction": F.softplus(self.global_head(global_features)).flatten() * scale if branch != "local" else x.new_zeros((len(x),)),
                 "features": fused, "quality": quality, "gates": gates}
 
 
@@ -114,7 +118,7 @@ class GraceRUL(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = dict(config)
-        self.register_buffer("repair_enabled", torch.tensor(True))
+        self.register_buffer("repair_enabled", torch.tensor(bool(config["train_repair"])))
         self.register_buffer("correction_bound", torch.tensor(float(config["correction_bound"])))
         self.detector = FaultDetector(config)
         self.generator = SensorGenerator(config)
@@ -125,8 +129,10 @@ class GraceRUL(nn.Module):
         nn.init.zeros_(self.corrector[-1].weight)
         nn.init.zeros_(self.corrector[-1].bias)
 
-    def forward(self, x, valid=None, use_repair=True, use_correction=True, branch="both", equal_fusion=False):
-        use_repair = use_repair and bool(self.repair_enabled)
+    def forward(self, x, valid=None, use_repair=True, use_correction=True, branch=None, equal_fusion=None):
+        use_repair = use_repair and self.config["train_repair"] and bool(self.repair_enabled)
+        branch = self.config.get("predictor_branch", "both") if branch is None else branch
+        equal_fusion = self.config.get("equal_fusion", False) if equal_fusion is None else equal_fusion
         valid = torch.ones(x.shape[:2], dtype=torch.bool, device=x.device) if valid is None else valid.bool()
         settings = torch.nan_to_num(x[..., :3]) * valid.unsqueeze(-1)
         mask = torch.isfinite(x[..., 3:]).float() * valid.unsqueeze(-1)

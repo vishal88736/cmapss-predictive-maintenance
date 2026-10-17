@@ -2,7 +2,7 @@
 
 FORMAT_VERSION = 5
 ARCHITECTURE = "detector-residual-bilstm-wgan-gated-cnn-gru-transformer-residual-v5"
-CORRUPTION_PROTOCOL = "persistent-causal-faults-v2"
+CORRUPTION_PROTOCOL = "persistent-causal-faults-v3"
 SETTINGS = [f"setting_{i}" for i in range(1, 4)]
 SENSORS = [f"sensor_{i}" for i in range(1, 22)]
 FEATURE_COLUMNS = SETTINGS + SENSORS
@@ -25,7 +25,8 @@ DEFAULT_CONFIG = {
     "critic_steps": 1, "gradient_penalty": 10.0, "gradient_penalty_batch_size": 16,
     "adversarial_warmup": 5,
     "oof_folds": 3, "window_stride": 1, "clean_fraction": 0.25,
-    "fault_start_horizon": 100, "drift_ramp_cycles": 100,
+    "fault_start_horizon": 100, "drift_ramp_cycles": 100, "block_gap_cycles": 50,
+    "curriculum_epochs": 10, "train_corrupted_predictor": True,
     "split_seed": 42, "validation_seed": 31415, "validation_prefixes": 3,
     "correction_prefixes": 6, "engine_balanced_sampling": True,
     "rul_loss_weight": 1.0, "reconstruction_loss_weight": 1.0,
@@ -33,19 +34,24 @@ DEFAULT_CONFIG = {
     "detection_loss_weight": 0.2, "detector_positive_weight_cap": 5.0,
     "trend_loss_weight": 0.1, "adversarial_loss_weight": 0.01,
     "consistency_loss_weight": 0.1, "branch_loss_weight": 0.1,
+    "clean_rul_loss_weight": 0.25,
     "lr_factor": 0.5, "lr_patience": 5, "minimum_learning_rate": 0.000001,
-    "max_clean_rmse_increase": 0.05, "max_intact_repair_rmse": 0.15,
+    "max_clean_rmse_increase": 0.01, "max_intact_repair_rmse": 0.15,
     "max_reconstruction_rmse": 1.5,
-    "predictor_family": "gated", "train_repair": True,
+    "predictor_family": "gated", "predictor_branch": "both", "equal_fusion": False,
+    "train_repair": True,
     "tune_before_training": True, "run_matched_benchmarks": False,
-    "run_extended_evaluation": False,
+    "run_extended_evaluation": False, "benchmark_tune": True,
     "benchmark_variants": ["paper_A_cnn_gru", "paper_B_repair_cnn_lstm",
                            "paper_C_transformer_corrected", "grace_without_adversarial",
-                           "grace_without_trend", "grace_without_repair"],
+                           "grace_without_trend", "grace_without_repair", "grace_local",
+                           "grace_global", "grace_equal_fusion", "grace_without_correction",
+                           "pure_transformer"],
     "bootstrap_samples": 1000,
     "seeds": [42, 123, 2026, 314, 777], "seed": 42, "quick_run": False,
     "maximum_batches": None, "maximum_engines": None, "maximum_windows": None,
-    "background_size": 12, "explanation_samples": 128, "cpu_threads": 2,
+    "background_size": 48, "explanation_samples": 256, "explanation_examples": 12,
+    "explanation_repeats": 3, "cpu_threads": 2,
     "progress_interval_seconds": 30.0,
 }
 
@@ -58,8 +64,11 @@ def quick_config(config):
             "maximum_windows": 48, "batch_size": 8, "generator_hidden": 16,
             "cnn_channels": 8, "gru_hidden": 16, "transformer_dim": 32,
             "adversarial_warmup": 0, "background_size": 3, "mc_passes": 4,
+            "explanation_examples": 2, "explanation_repeats": 1,
             "explanation_samples": 64, "window_stride": 5,
             "validation_prefixes": 2, "correction_prefixes": 3,
             "correction_bounds": [15.0], "tune_before_training": False,
             "run_matched_benchmarks": False, "run_extended_evaluation": True,
+            "benchmark_variants": ["paper_A_cnn_gru", "paper_B_repair_cnn_lstm",
+                                   "paper_C_transformer_corrected", "grace_without_repair"],
             "bootstrap_samples": 100}

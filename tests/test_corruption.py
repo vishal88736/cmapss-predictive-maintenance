@@ -7,10 +7,23 @@ import numpy as np
 import pandas as pd
 
 from grace_rul.config import COLUMNS, DEFAULT_CONFIG, FEATURE_COLUMNS
-from grace_rul.data import FAULTS, WindowDataset, corrupt_trajectory
+from grace_rul.data import FAULTS, WindowDataset, corrupt_trajectory, select_background_indices, window_view
 
 
 class CausalCorruption(unittest.TestCase):
+    def test_block_faults_recur_in_late_observed_history(self):
+        reference = np.ones((600, 24), dtype=np.float32)
+        for seed in range(12):
+            with self.subTest(seed=seed):
+                damaged, labels = corrupt_trajectory(reference, np.random.default_rng(seed), "block", .2,
+                                                     start_horizon=0)
+                self.assertTrue(labels[-70:].any(), "Late endpoints must not all become clean after an early block.")
+                self.assertTrue(np.isfinite(damaged[150:, 3:]).all(1).any(), "Temporary blocks must leave intact intervals.")
+                short, short_labels = corrupt_trajectory(reference[:350], np.random.default_rng(seed), "block", .2,
+                                                         start_horizon=0)
+                np.testing.assert_array_equal(short, damaged[:350])
+                np.testing.assert_array_equal(short_labels, labels[:350])
+
     def test_unseen_future_does_not_change_corrupted_prefix(self):
         reference = np.random.default_rng(8).normal(size=(240, 24)).astype(np.float32)
         for family in [*FAULTS, "mixed", None, "clean"]:
@@ -95,9 +108,41 @@ class CausalCorruption(unittest.TestCase):
     def test_invalid_timing_parameters_are_rejected(self):
         reference = np.ones((30, 24), dtype=np.float32)
         for values in [{"start_horizon": -1}, {"start_horizon": True}, {"start_horizon": 1.5},
-                       {"drift_ramp_cycles": 0}, {"drift_ramp_cycles": True}, {"drift_ramp_cycles": 1.5}]:
+                          {"drift_ramp_cycles": 0}, {"drift_ramp_cycles": True}, {"drift_ramp_cycles": 1.5},
+                          {"block_gap_cycles": 0}, {"block_gap_cycles": True}, {"block_gap_cycles": 1.5}]:
             with self.subTest(values=values), self.assertRaises(ValueError):
                 corrupt_trajectory(reference, np.random.default_rng(42), "drift", **values)
+
+    def test_background_selection_spreads_engines_regimes_and_life_stages(self):
+        frames = []
+        for unit in range(1, 21):
+            frame = pd.DataFrame(np.ones((180, len(COLUMNS))), columns=COLUMNS)
+            frame["unit"], frame["cycle"] = unit, np.arange(1, 181)
+            frames.append(frame)
+        scaler = SimpleNamespace(transform=lambda group: (group[FEATURE_COLUMNS].to_numpy(np.float32),
+            ((group.cycle.to_numpy() // 20 + int(group.unit.iloc[0])) % 3)))
+        data = WindowDataset(pd.concat(frames), scaler, DEFAULT_CONFIG, mode="correction", family="clean")
+        indices, metadata = select_background_indices(data, 12, 42)
+        self.assertEqual((indices, metadata), select_background_indices(data, 12, 42))
+        self.assertEqual(len(set(indices)), 12)
+        self.assertEqual(len({row["unit"] for row in metadata}), 12)
+        self.assertEqual({row["regime"] for row in metadata}, {0, 1, 2})
+        self.assertGreaterEqual(len({row["life_stage"] for row in metadata}), 3)
+        self.assertTrue({row["unit"] for row in metadata} <= set(data.engines[i]["unit"] for i, _ in data.samples))
+
+    def test_comparator_contexts_share_endpoint_and_fault_realization(self):
+        frame = pd.DataFrame(np.ones((220, len(COLUMNS))), columns=COLUMNS)
+        frame["unit"], frame["cycle"] = 1, np.arange(1, 221)
+        scaler = SimpleNamespace(transform=lambda group: (group[FEATURE_COLUMNS].to_numpy(np.float32), None))
+        original = WindowDataset(frame, scaler, DEFAULT_CONFIG, mode="test", family="block")
+        shorter = window_view(original, 30)
+        self.assertIs(window_view(original, 70), original)
+        self.assertIs(original.cache, shorter.cache)
+        first, second = original[0], shorter[0]
+        self.assertEqual((first["unit"], first["cycle"]), (second["unit"], second["cycle"]))
+        np.testing.assert_array_equal(first["x"].numpy()[-30:], second["x"].numpy())
+        np.testing.assert_array_equal(first["altered"].numpy()[-30:], second["altered"].numpy())
+        self.assertEqual(original.config["sequence_length"], 70)
 
 
 if __name__ == "__main__":

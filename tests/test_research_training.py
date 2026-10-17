@@ -13,13 +13,13 @@ import pandas as pd
 import torch
 
 from grace_rul.artifacts import load_bundle, run_experiment
-from grace_rul.benchmark import _comparison_tables, paired_bootstrap
+from grace_rul.benchmark import _active_comparison_tables, _comparison_tables, paired_bootstrap
 from grace_rul.checkpoints import load_checkpoint, pipeline_identity, save_checkpoint
 from grace_rul.config import DEFAULT_CONFIG, quick_config
-from grace_rul.data import OperatingRegimeScaler, WindowDataset, load_training_subset
+from grace_rul.data import OperatingRegimeScaler, WindowDataset, load_subset, load_training_subset
 from grace_rul.model import GraceRUL
 from grace_rul.training import (acceptable_checkpoint, evaluate, fit_corrector, fit_pipeline,
-                                loader, repair_trend_loss, seed_all, validate_training_config)
+                                loader, objectives, repair_trend_loss, seed_all, validate_training_config, validation_score)
 from grace_rul.tuning import run_validation_search
 from website.backend.service import InferenceService
 
@@ -46,6 +46,71 @@ class ResearchTraining(unittest.TestCase):
         torch.testing.assert_close(result["repaired"][finite], values[..., 3:][finite], rtol=0, atol=1e-6)
         self.assertTrue(torch.isfinite(result["repaired"]).all())
         self.assertLess(float(result["fault_scores"][finite].max().detach()), .02)
+
+    def test_no_repair_predictor_still_trains_on_corruptions(self):
+        config = {**self.config, "train_repair": False, "clean_fraction": 0.,
+                  "fault_start_horizon": 0, "maximum_batches": 1}
+        batches = []
+
+        def inspect(model, batch, *args, **kwargs):
+            batches.append(bool(batch["altered"].any()))
+            self.assertFalse(bool(model.repair_enabled))
+            return objectives(model, batch, *args, **kwargs)
+
+        def fixed_training_fault(*args, **kwargs):
+            if kwargs.get("mode", "train") == "train":
+                kwargs["family"] = "bias"
+            return WindowDataset(*args, **kwargs)
+
+        with patch("grace_rul.training.objectives", side_effect=inspect), \
+                patch("grace_rul.training.WindowDataset", side_effect=fixed_training_fault), \
+                patch("grace_rul.model.SensorGenerator.forward", side_effect=AssertionError("Disabled recovery executed")):
+            model, _, history, _ = fit_pipeline(self.fit, self.val, "FD001", config, 42, verbose=False)
+        self.assertEqual(history.stage.tolist(), ["predictor", "joint"])
+        self.assertEqual(batches, [True])
+        self.assertFalse(bool(model.repair_enabled))
+
+    def test_trained_single_branch_cannot_use_the_disabled_branch(self):
+        x = torch.randn(2, 70, 24)
+        valid = torch.ones(2, 70, dtype=torch.bool)
+        for branch, inactive in [("local", "global"), ("global", "local")]:
+            with self.subTest(branch=branch):
+                model = GraceRUL({**self.config, "predictor_branch": branch}).train()
+                blocked = model.predictor.transformer if branch == "local" else model.predictor.gru
+                with patch.object(blocked, "forward", side_effect=AssertionError("Inactive branch executed")):
+                    out = model(x, valid)
+                    out["prediction"].sum().backward()
+                self.assertTrue(torch.isfinite(out["prediction"]).all())
+                self.assertTrue((out[f"{inactive}_prediction"] == 0).all())
+                self.assertTrue((out["correction_features"][:, -1 if inactive == "global" else -2] == 0).all())
+                inactive_head = model.predictor.global_head if inactive == "global" else model.predictor.local_head
+                self.assertIsNone(inactive_head.weight.grad)
+
+    def test_clean_anchor_updates_predictor_without_reconstruction(self):
+        config = {**self.config, **{k: 0. for k in self.config if k.endswith("_loss_weight")},
+                  "clean_rul_loss_weight": 1., "train_repair": False}
+        model = GraceRUL(config).train()
+        sample = WindowDataset(self.fit, self.scaler, config, family="bias")[0]
+        batch = {k: v[None] for k, v in sample.items() if isinstance(v, torch.Tensor)}
+        loss, out = objectives(model, batch, consistency=False)
+        loss.backward()
+        self.assertGreater(float(out["loss_terms"]["clean_rul"]), 0.)
+        self.assertTrue(torch.isfinite(loss))
+        self.assertGreater(float(model.predictor.head[-1].weight.grad.abs().sum()), 0.)
+
+    def test_fault_metrics_separate_unaffected_windows(self):
+        config = {**self.config, "fault_start_horizon": 0}
+        clean = WindowDataset(self.val, self.scaler, config, mode="test", family="clean")[0]
+        faulty = WindowDataset(self.val, self.scaler, config, mode="test", family="block")[1]
+        report, records = evaluate(GraceRUL(config).eval(), [clean, faulty], config)
+        self.assertEqual(records.active_fault.tolist(), [False, True])
+        self.assertEqual((report["active_fault_N"], report["unaffected_N"]), (1, 1))
+        self.assertEqual(report["affected_endpoint_fraction"], .5)
+        self.assertAlmostEqual(report["active_fault_RMSE"], abs(records.iloc[1].prediction - records.iloc[1].target))
+        with patch("grace_rul.training.evaluate", side_effect=[({"RMSE": 10.}, None),
+                ({"RMSE": 5., "active_fault_RMSE": 14.}, None)]):
+            score, _, _ = validation_score(None, None, None, config)
+        self.assertEqual(score, 12.)
 
     def test_trend_loss_uses_affected_real_pairs_and_has_gradients(self):
         repaired = torch.tensor([[[99.], [0.], [2.], [5.]]], requires_grad=True)
@@ -83,8 +148,8 @@ class ResearchTraining(unittest.TestCase):
 
     def test_checkpoint_constraints_reject_clean_and_repair_regressions(self):
         damaged = {"intact_repair_RMSE": .1, "reconstruction_RMSE": 1.}
-        self.assertTrue(acceptable_checkpoint({"RMSE": 10.4}, damaged, 10., self.config))
-        self.assertFalse(acceptable_checkpoint({"RMSE": 10.6}, damaged, 10., self.config))
+        self.assertTrue(acceptable_checkpoint({"RMSE": 10.05}, damaged, 10., self.config))
+        self.assertFalse(acceptable_checkpoint({"RMSE": 10.2}, damaged, 10., self.config))
         self.assertFalse(acceptable_checkpoint({"RMSE": 5.}, {**damaged, "intact_repair_RMSE": .2}, 10., self.config))
         self.assertFalse(acceptable_checkpoint({"RMSE": 5.}, {**damaged, "reconstruction_RMSE": 2.}, 10., self.config))
 
@@ -109,7 +174,7 @@ class ResearchTraining(unittest.TestCase):
                 torch.testing.assert_close(model.state_dict()[name], weights, rtol=0, atol=0)
 
     def test_scheduler_reduction_survives_interruption(self):
-        config = {**self.config, "train_repair": False, "predictor_epochs": 4,
+        config = {**self.config, "train_repair": False, "train_corrupted_predictor": False, "predictor_epochs": 4,
                   "maximum_batches": 1, "lr_patience": 1}
         flat_score = lambda *args, **kwargs: (10., {"RMSE": 10.}, {"RMSE": 10., "reconstruction_RMSE": 1.})
         with patch("grace_rul.training.validation_score", side_effect=flat_score):
@@ -145,8 +210,8 @@ class ResearchTraining(unittest.TestCase):
             return GraceRUL(config).eval(), OperatingRegimeScaler().fit(fit, subset, 42), pd.DataFrame(), 0.
 
         scores = [(10., {"RMSE": 10.}, {"RMSE": 10.}),
-                  (8., {"RMSE": 10.4}, {"RMSE": 5.6}),
-                  (7., {"RMSE": 10.6}, {"RMSE": 3.4})]
+                  (8., {"RMSE": 10.05}, {"RMSE": 5.95}),
+                  (7., {"RMSE": 10.2}, {"RMSE": 3.8})]
         with patch("grace_rul.training.fit_pipeline", side_effect=temporary), \
                 patch("grace_rul.training.validation_score", side_effect=scores), contextlib.redirect_stdout(io.StringIO()):
             history, _, _ = fit_corrector(model, self.fit, self.val, "FD001", config, 42)
@@ -155,6 +220,40 @@ class ResearchTraining(unittest.TestCase):
         loaded = GraceRUL(config)
         loaded.load_state_dict(model.state_dict())
         self.assertEqual(float(loaded.correction_bound), 5.)
+
+    def test_corrector_cannot_compound_the_clean_regression_tolerance(self):
+        config = {**self.config, "correction_bounds": [5.], "correction_epochs": 1}
+        model = GraceRUL(config).eval()
+        model.scaler, model.pretrained_clean_rmse = self.scaler, 10.
+
+        def temporary(fit, val, subset, cfg, seed, **kwargs):
+            return GraceRUL(cfg).eval(), OperatingRegimeScaler().fit(fit, subset, 42), pd.DataFrame(), 0.
+
+        scores = [(10., {"RMSE": 10.05}, {"RMSE": 9.95}),
+                  (8., {"RMSE": 10.12}, {"RMSE": 5.88})]
+        with patch("grace_rul.training.fit_pipeline", side_effect=temporary), \
+                patch("grace_rul.training.validation_score", side_effect=scores), contextlib.redirect_stdout(io.StringIO()):
+            history, _, _ = fit_corrector(model, self.fit, self.val, "FD001", config, 42)
+        self.assertEqual(history.checkpoint_accepted.tolist(), [True, False])
+        self.assertTrue((model.corrector[-1].weight == 0).all())
+
+    def test_no_correction_ablation_reuses_exact_frozen_upstream_weights(self):
+        config = {**self.config, "maximum_batches": 1, "run_matched_benchmarks": True,
+                  "benchmark_variants": ["grace_without_correction"]}
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
+            with patch("grace_rul.benchmark.fit_pipeline", side_effect=AssertionError("Unchanged upstream model retrained")), \
+                    patch("grace_rul.benchmark.fit_corrector", side_effect=AssertionError("Correction ablation fitted a corrector")):
+                path, tables = run_experiment(ROOT, config, Path(directory))
+            _, loaded = load_bundle(path)
+            item = loaded["FD001"]
+            _, test, truths = load_subset(ROOT / "data", "FD001")
+            dataset = WindowDataset(test[test.unit <= 3], item["scaler"], config, mode="test", family="clean", truths=truths)
+            _, expected = evaluate(item["model"], dataset, config, use_correction=False)
+            records = pd.read_csv(path.parent / "benchmark_predictions.csv.gz")
+            measured = records[(records.variant == "grace_without_correction") & (records.family == "clean")].sort_values("unit")
+            np.testing.assert_allclose(measured.prediction, expected.sort_values("unit").prediction)
+            self.assertTrue(bool(tables["benchmark_training_audit"].iloc[0].reused_identical_weights))
+            self.assertEqual(int(tables["benchmark_training_audit"].iloc[0].upstream_epochs), 0)
 
     def test_tuning_uses_only_training_files_and_common_partitions(self):
         calls = []
@@ -211,6 +310,24 @@ class ResearchTraining(unittest.TestCase):
         self.assertAlmostEqual(float(checks.iloc[0].relative_improvement), .5)
         self.assertFalse(bool(checks.iloc[0].acceptance_target_met))
         self.assertFalse(bool(checks.iloc[0].full_protocol_complete))
+
+    def test_active_comparisons_pair_only_commonly_damaged_windows(self):
+        errors, masks = {}, {}
+        for variant, squared, mask in [("GRACE_RUL", [1., 999.], [True, True]),
+                                       ("baseline", [4., 0.], [True, False])]:
+            key = (variant, "FD001", "block", .2, "capped_125")
+            errors[key] = {42: {0: np.array(squared)}}
+            masks[key] = {42: {0: np.array(mask)}}
+        comparison, checks = _active_comparison_tables(errors, masks, self.config)
+        self.assertEqual(float(comparison.iloc[0].GRACE_RMSE), 1.)
+        self.assertEqual(float(comparison.iloc[0].comparator_RMSE), 2.)
+        self.assertEqual(float(comparison.iloc[0].common_affected_endpoint_fraction), .5)
+        self.assertAlmostEqual(float(checks.iloc[0].active_relative_improvement), .5)
+        self.assertFalse(bool(checks.iloc[0].active_fault_acceptance))
+        masks[("baseline", "FD001", "block", .2, "capped_125")][42][0][:] = False
+        comparison, checks = _active_comparison_tables(errors, masks, self.config)
+        self.assertIsNone(comparison.iloc[0].GRACE_RMSE)
+        self.assertFalse(bool(checks.iloc[0].active_fault_acceptance))
 
     def test_invalid_seed_and_numeric_settings_are_rejected(self):
         for overrides in [{"seeds": [42, 42]}, {"bootstrap_samples": 0},
@@ -278,11 +395,14 @@ class ResearchTraining(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
             with patch("grace_rul.tuning.SEARCH_CANDIDATES", [("default", {}), ("without_adversarial", {"adversarial_loss_weight": 0.})]), \
+                    patch("grace_rul.tuning.comparison_candidates", return_value=[("default", {}), ("more_clean", {"clean_fraction": .5})]), \
                     patch("grace_rul.benchmark.evaluate", side_effect=inspect_dataset):
                 path, tables = run_experiment(ROOT, config, Path(directory) / "quick")
             bundle, loaded = load_bundle(path)
             self.assertEqual(set(tables["benchmark_training_audit"].variant), set(config["benchmark_variants"]))
-            self.assertTrue((tables["benchmark_training_audit"].upstream_epochs == 1).all())
+            self.assertTrue((tables["benchmark_training_audit"].upstream_epochs == 2).all())
+            self.assertTrue(tables["benchmark_training_audit"].independent_tuning.all())
+            self.assertTrue(tables["benchmark_training_audit"].corruption_trained_predictor.all())
             self.assertFalse(tables["superiority_checks"].acceptance_target_met.any())
             predictions = pd.read_csv(path.parent / "benchmark_predictions.csv.gz")
             keys = ["unit", "cycle", "family", "severity", "replicate"]

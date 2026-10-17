@@ -26,6 +26,8 @@ def main():
     benchmarks.add_argument("--benchmarks", action="store_true", help="Train separate comparison models after exporting GRACE-RUL.")
     benchmarks.add_argument("--skip-benchmarks", action="store_true")
     parser.add_argument("--extended-evaluation", action="store_true", help="Generate extra robustness and inference-ablation reports.")
+    parser.add_argument("--paper-study", action="store_true", help="Enable independently tuned comparisons and full robustness reports.")
+    parser.add_argument("--explanations", action="store_true", help="Calculate global SHAP/LIME and repeated-seed stability after training.")
     parser.add_argument("--benchmark-variants", nargs="+", choices=sorted(VARIANTS))
     args = parser.parse_args()
     config = dict(DEFAULT_CONFIG)
@@ -51,6 +53,8 @@ def main():
         config["run_matched_benchmarks"] = True
     if args.extended_evaluation:
         config["run_extended_evaluation"] = True
+    if args.paper_study:
+        config["run_matched_benchmarks"] = config["run_extended_evaluation"] = True
     if args.skip_tuning:
         config["tune_before_training"] = False
     if args.skip_benchmarks:
@@ -59,6 +63,10 @@ def main():
     print(f"Artifact: {path}")
     if "superiority_checks" in tables:
         print(tables["superiority_checks"].to_string(index=False))
+    if args.explanations:
+        from grace_rul.explain import run_explanation_study
+        from grace_rul.training import device_for
+        run_explanation_study(ROOT, path, device=str(device_for(config)))
 
 
 if __name__ == "__main__":

@@ -1,18 +1,30 @@
 """Rebuild the checked-in notebook from readable, deterministic source cells."""
 
+import hashlib
+import json
 from pathlib import Path
-import nbformat as nbf
 
 ROOT = Path(__file__).resolve().parents[1]
 cells = []
 
 
 def md(source):
-    cells.append(nbf.v4.new_markdown_cell(source.strip()))
+    add_cell("markdown", source)
 
 
 def code(source, tags=None):
-    cells.append(nbf.v4.new_code_cell(source.strip(), metadata={"tags": tags or []}))
+    compile(source.strip(), "notebook cell", "exec")
+    add_cell("code", source, tags)
+
+
+def add_cell(kind, source, tags=None):
+    source = source.strip()
+    cell = {"cell_type": kind, "id": hashlib.sha256(f"{len(cells)}:{source}".encode()).hexdigest()[:12],
+            "metadata": {"tags": tags or []} if kind == "code" else {},
+            "source": source.splitlines(keepends=True)}
+    if kind == "code":
+        cell.update(execution_count=None, outputs=[])
+    cells.append(cell)
 
 
 md("""
@@ -54,7 +66,7 @@ from grace_rul.model import GraceRUL
 from grace_rul.data import load_subset, split_engines, OperatingRegimeScaler, WindowDataset
 from grace_rul.training import seed_all, device_for
 from grace_rul.artifacts import run_experiment, load_bundle
-from grace_rul.explain import explain_window
+from grace_rul.explain import explain_window, run_explanation_study
 
 print('Project:', PROJECT_ROOT)
 print('Python:', platform.python_version(), '| Torch:', torch.__version__, '| CUDA:', torch.cuda.is_available())
@@ -67,29 +79,39 @@ three settings, a two-layer BiLSTM generator, and two Transformer layers with fo
 The residual generator starts by preserving observed values. Direct reconstruction,
 temporal-trend supervision, and intact-entry identity losses train recovery. Full mode
 uses stride-1 windows and balances sampling by engine. Learning-rate reduction and
-clean/intact/reconstruction checkpoint limits are configurable.
+clean/intact/reconstruction checkpoint limits are configurable. Joint training includes
+clean-reference RUL supervision and permits at most 1% clean RMSE regression by default.
+The curriculum reaches full fault severity within ten epochs, before default patience expires.
 Corruption labels supervise detection/recovery only; they are never inference features.
 The critic is training-only. Training targets are capped at 125; evaluation reports capped
 and original official targets separately. Empirical intervals are not conformal guarantees.
 
-Partition and corruption seeds are fixed across training seeds. Validation samples
+Partition and validation/evaluation corruption seeds are fixed across training seeds. Validation samples
 three prefixes per engine; correction uses six; calibration retains one independent
 endpoint per engine. Full runs train separate models for each subset. Seeds are selected using validation
 performance, never test scores. Training explicitly requests `CONFIG['device'] = 'cuda'`.
 Fault starts use absolute observed offsets up to `CONFIG['fault_start_horizon']`;
 drift ramps over `CONFIG['drift_ramp_cycles']`, independently of final trajectory
 length. Mixed faults use independent random streams. Defaults are 100 cycles for
-both controls. Checkpoints from the earlier simulator require a fresh run directory.
+both controls. Temporary blocks recur with independently sampled gaps up to
+`block_gap_cycles` (50). Reports separate active faults from unaffected windows.
+Selection averages clean and active-mixed-fault RMSE; changing the training clean
+fraction does not change the fixed validation faults. Checkpoints from earlier
+simulators require a fresh run directory.
 Use `nvidia-smi` and the GPU check in README.md before starting. An intentional CPU
 execution check requires changing the device to `'cpu'`.
 """)
 code("""
 QUICK_RUN = False
+RUN_PAPER_STUDY = False
 RUN_EXPLANATIONS = False
 CONFIG = dict(DEFAULT_CONFIG)
 CONFIG['device'] = 'cuda'
 if QUICK_RUN:
     CONFIG = quick_config(CONFIG)
+if RUN_PAPER_STUDY:
+    CONFIG['run_matched_benchmarks'] = True
+    CONFIG['run_extended_evaluation'] = True
 
 seed_all(CONFIG['seed'], CONFIG['cpu_threads'])
 TRAINING_DEVICE = device_for(CONFIG)
@@ -186,7 +208,7 @@ epochs (including OOF models) are saved in the printed run directory's `checkpoi
 To resume after interrupting, restart the kernel and rerun setup/configuration with
 the same settings, then pass that run directory as `output_dir` to `run_experiment`.
 Completed upstream models load from checkpoints; correction and evaluation rerun.
-The corrected `persistent-causal-faults-v2` simulator has a new training identity;
+The corrected `persistent-causal-faults-v3` simulator has a new training identity;
 pre-correction checkpoints require a fresh directory even if their bundle format is 5.
 Older format-3/4 runs are incompatible with the residual-recovery format-5 pipeline and
 require fresh training. The interrupted October 8 artifacts have been removed.
@@ -197,11 +219,18 @@ and mean/std summaries are saved. They are explicitly upstream CV; the complete
 corrected pipeline is evaluated separately on official test files.
 
 It evaluates clean official test endpoints and records upstream cross-validation metrics.
+Set `RUN_PAPER_STUDY = True` before training for both comparison and robustness evidence.
 Set `CONFIG['run_extended_evaluation'] = True` for extra corrupted endpoint predictions,
 unseen severities, and inference-intervention ablations. Set
 `CONFIG['run_matched_benchmarks'] = True` to separately train
 CNN–GRU, repair/CNN–LSTM, and Transformer/correction adaptations plus retrained
 GRACE ablations. These optional experiments do not update the primary model.
+Paper adaptations get their own equal-count validation search. Controlled GRACE
+ablations retain the selected settings and remaining branch/reliability interfaces.
+No-repair models still receive corrupted-input predictor training. Separate clean-only
+references are available explicitly. Retrained local/global/equal-fusion/no-correction
+variants are included in the full comparison list. Every fault report includes its
+actual affected-endpoint/entry rates and active-fault RMSE, for capped and raw targets.
 Identical test engines and corruptions support paired seed/engine
 bootstrap comparisons. The Transformer comparator uses supervised residual correction,
 not the original TD3. These are harmonized adaptations, not reproductions of published
@@ -234,7 +263,7 @@ fig.savefig(RUN_DIR / 'training_curves.png', dpi=150); plt.show()
 display(TABLES['test_metrics'])
 display(TABLES['cross_validation_metrics'])
 display(TABLES['cross_validation_summary'])
-for name in ['robustness_summary', 'ablation_metrics', 'validation_search', 'test_seed_summary', 'benchmark_summary', 'superiority_checks']:
+for name in ['robustness_summary', 'ablation_metrics', 'validation_search', 'test_seed_summary', 'benchmark_summary', 'benchmark_active_comparison', 'benchmark_training_audit', 'superiority_checks', 'background_audit']:
     if name in TABLES:
         display(Markdown(f'**{name}**'))
         display(TABLES[name])
@@ -252,7 +281,7 @@ bundle, loaded = load_bundle(BUNDLE_PATH, device='cpu')
 subset = CONFIG['subsets'][0]
 entry = loaded[subset]
 train, test, truths = load_subset(PROJECT_ROOT / 'data', subset)
-sample_ds = WindowDataset(test[test.unit == test.unit.min()], entry['scaler'], CONFIG,
+sample_ds = WindowDataset(test[test.unit == test.unit.min()], entry['scaler'], entry['model'].config,
                           mode='test', family='bias', severity=.2, seed=42, truths=truths)
 sample = sample_ds[0]
 with torch.no_grad():
@@ -280,12 +309,18 @@ md("""
 Use actual Kernel SHAP and LIME over coherent sensor/time blocks. Explain the selected
 sensor's detector score and final RUL separately. Perturbations preserve missingness,
 settings, and padding, and replace sensor blocks with unmodified fitting references.
-Backgrounds are selected by operating-setting similarity. LIME reports weighted
+Fitting backgrounds are stratified across engines, regimes, and life stages, then
+matched by setting history. Short references are never cyclically repeated. LIME reports weighted
 held-out perturbation fidelity. SHAP contributions and LIME coefficients have different
 scales; agreement is not forced. High RUL importance alone does not establish a fault.
 
 Set `RUN_EXPLANATIONS = True` in the configuration cell to generate these optional plots.
 They are skipped by default and do not affect saved model weights.
+This also calculates global sensor importance over distinct held-out engines, with
+repeated explanation seeds and separate within-engine and between-engine variability.
+Full mode defaults to 12 engines and three explanation seeds per subset; quick mode
+uses two engines and one seed, so stability is unavailable. No forced top-ten SHAP
+sparsity is applied. These calculations use the selected trained model, without fitting it.
 The full run uses three temporal blocks per sensor; quick mode uses one to reduce cost.
 Detailed website explanations are computed on demand after an engine is selected.
 """)
@@ -305,6 +340,9 @@ if RUN_EXPLANATIONS:
         print(target['target'], 'LIME held-out fidelity:', target['lime_holdout_fidelity'])
         display(pd.DataFrame(target['sensors']).head(10))
     fig.tight_layout(); fig.savefig(RUN_DIR / 'shap_sensor_evidence.png', dpi=150); plt.show()
+    global_importance = run_explanation_study(PROJECT_ROOT, BUNDLE_PATH,
+                                             device=str(TRAINING_DEVICE))
+    display(global_importance.groupby('subset', sort=False).head(10))
 else:
     print('Optional SHAP/LIME plots skipped. Set RUN_EXPLANATIONS = True to generate them.')
 """)
@@ -328,9 +366,14 @@ print(f'GRACE_MODEL_PATH=\"{BUNDLE_PATH}\" .venv/bin/python -m uvicorn website.b
 print('Automatic loading remains a placeholder until a full run exists.' if QUICK_RUN else 'Refresh the website model status to load this full run.')
 """)
 
-notebook = nbf.v4.new_notebook(cells=cells, metadata={
+notebook = {"nbformat": 4, "nbformat_minor": 5, "cells": cells, "metadata": {
     "kernelspec": {"display_name": "Python (GRACE-RUL)", "language": "python", "name": "grace-rul"},
-    "language_info": {"name": "python", "version": "3.12"}})
-nbf.validate(notebook)
-nbf.write(notebook, ROOT / "GRACE_RUL_all_subsets.ipynb")
+    "language_info": {"name": "python", "version": "3.12"}}}
+try:
+    import nbformat
+except ImportError:
+    pass  # The builder only needs the standard library; runtime validation uses nbformat.
+else:
+    nbformat.validate(notebook)
+(ROOT / "GRACE_RUL_all_subsets.ipynb").write_text(json.dumps(notebook, indent=1, ensure_ascii=False) + "\n")
 print(f"Created {len(cells)} cells.")

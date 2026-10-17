@@ -20,32 +20,42 @@ consecutive real timesteps touching a changed entry and excludes padding.
 
 Default loss weights are RUL 1, repaired reconstruction 1, direct generator
 reconstruction 0.25, identity 0.5, detection 0.2, trend 0.1, adversarial 0.01,
-consistency 0.1, and branch supervision 0.1. Detector positive weights use the
+consistency 0.1, and branch supervision 0.1.
+Additional clean-reference RUL supervision has weight 0.25 during joint training;
+the reference pass disables dropout and contributes gradients only to the predictor.
+The corruption curriculum reaches full difficulty within ten epochs, before the
+default early-stopping patience expires. Detector positive weights use the
 square root of negative/positive counts, bounded between 1 and 5 per channel.
-Recovery is accepted only if clean validation RMSE grows at most 5%, intact-entry
+Recovery is accepted only if clean validation RMSE grows at most 1%, intact-entry
 normalized RMSE is at most 0.15, altered-entry RMSE is at most 1.5, and the macro
 RUL score improves. These initial limits are configurable research choices.
 If no repair candidate passes, the pretrained predictor is retained and the saved
 `repair_enabled` buffer is false. This fallback also lacks trained finite-fault
 detection; the website distinguishes predictor input from recovered readings.
-Correction separately protects clean RMSE and
+Correction uses the same original clean-predictor reference, preventing consecutive
+stages from each spending another copy of the tolerance, and
 can retain zero correction. The website reports the selected repair status and bounds.
 
 Validation-only search tries defaults, stride 5, stronger recovery/trend, greater
-identity protection, and zero adversarial loss. It opens only training files,
+identity protection, zero adversarial loss, and a larger clean fraction/anchor. It opens only training files,
 fits on fitting engines, and selects using validation engines; calibration and
 official test labels are excluded. The search selects upstream settings before
 OOF correction and uses one common training seed. Model seeds are selected after
 correction. The fixed split seed is 42; fixed validation corruption seed is 31415.
-Every seed and comparator shares the selected per-subset settings. This modest
+Primary seeds share selected per-subset settings. Paper adaptations instead receive
+their own six-trial searches on the same engine partitions. Their candidates tune
+learning rates, context, stride, clean fraction, or reconstruction as appropriate;
+the WGAN comparator keeps a positive adversarial weight. Controlled GRACE ablations
+retain the selected primary settings. This modest
 search does not establish an optimal configuration.
 
-Sensor corruption uses `persistent-causal-faults-v2`. Onsets are sampled from the
+Sensor corruption uses `persistent-causal-faults-v3`. Onsets are sampled from the
 absolute observed offsets 0 through `fault_start_horizon` (default 100), independently
 of eventual failure or total trajectory length. Drift grows with elapsed cycles
 after onset over `drift_ramp_cycles` (default 100), then stays at its sampled gain.
-Missing blocks retain their specified duration and are clipped only by the observed
-array boundary. A fault whose onset lies beyond the observed history has no effect
+Missing blocks recur after gaps between half of `block_gap_cycles` and that maximum
+(default 50 cycles); individual blocks retain their duration. A fault whose initial
+onset lies beyond the observed history has no effect
 on that history. Per-fault random streams keep mixed faults independent of the
 number of random samples drawn by another fault. Overlapping windows share cached
 trajectory faults.
@@ -73,23 +83,34 @@ bash scripts/setup_env.sh --cuda
 ```
 
 This defaults to FD001–FD004, five seeds, validation search, and three grouped OOF folds.
-There are up to 20 search fits and 80 primary upstream/fold fits. Separate comparison
+There are up to 24 search fits and 80 primary upstream/fold fits. Separate comparison
 training and extended robustness/ablation reports are disabled by default. The model,
-training losses, epoch budgets, validation, calibration, and seed selection are unchanged.
-Enabling the six comparison variants adds 360 upstream/fold fits of differing sizes
-and training stages, so fit counts alone do not determine wall-clock savings.
+epoch budgets, grouped correction and calibration remain intact. Comparisons add
+independent baseline searches and controlled ablations of differing sizes/stages.
+The no-correction ablation reuses unchanged upstream weights; identical selected
+ablations can reuse their exact weights. Fit counts alone do not determine wall-clock savings.
 Early stopping can reduce epochs. A functioning CUDA PyTorch environment is needed
 for a practical full study. CPU execution requires explicit `--device cpu`.
 
 For the complete comparison and reporting workflow:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --benchmarks --extended-evaluation --output-dir artifacts/research_with_reports
+.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_faults_v3
 ```
 
-The notebook exposes the same switches through `CONFIG['run_matched_benchmarks']`
-and `CONFIG['run_extended_evaluation']`. Its optional SHAP/LIME example uses
-`RUN_EXPLANATIONS = True`; on-demand website explanations remain available.
+The notebook exposes `RUN_PAPER_STUDY = True` and the individual report switches.
+`RUN_EXPLANATIONS = True` now calculates local explanations and global sensor importance
+over distinct held-out engines, repeated with different perturbation seeds. Fitting
+backgrounds are stratified across engines, regimes and life stages; provenance is in
+`background_audit.csv`. Full defaults use 48 backgrounds, 12 explained engines per
+subset and three explanation seeds. SHAP sparsity is not forced to ten features;
+SHAP additivity, LIME local error/fidelity and rank agreement are recorded separately.
+On-demand website explanations remain available. Existing trained weights can be
+explained separately without retraining:
+
+```bash
+.venv/bin/python scripts/explain_research.py artifacts/<run>/grace_rul_ALL.pt --device cuda
+```
 
 ```bash
 .venv/bin/python scripts/train_research.py --quick --device cpu --output-dir /tmp/grace-research-check
@@ -145,9 +166,20 @@ variants and conditions. Each engine's corruption replicates stay together. The
 corrupted macro weights subsets, fault families, and severities equally. A full
 acceptance check requires all four subsets, at least five distinct seeds, no quick
 data/batch limits, all specified conditions, at least 10% macro improvement, a
-positive lower improvement interval, and clean RMSE within 5% per subset.
+positive lower improvement interval, and clean RMSE within the configured tolerance
+(default 1%) per subset. Paper-comparator acceptance also requires independent tuning.
 Individual regressions remain visible. Acceptance is against harmonized adaptations;
 `published_paper_superiority_established` remains false in the manifest.
+`benchmark_active_comparison.csv` adds paired confidence intervals on faults present
+in both compared models' observed windows. The bootstrap retains whole engines and
+their corruption replicates. Acceptance also requires at least 10% active-fault macro
+improvement with a positive lower interval and complete active-scenario coverage.
 
 No full format-5 study is saved in the project's model slot. Verification results
 and the limited FD001 validation pilot are recorded in [VALIDATION.md](VALIDATION.md).
+The v3 repair checks and current neural-validation limitations are recorded in
+[the October 15 repair record](REPAIR_VALIDATION_2026-10-15.md). Fault reports now retain
+capped and official uncapped targets separately, plus active-fault and unaffected
+endpoint metrics. Selection averages clean and active-mixed-fault RMSE; validation
+faults are fixed independently of the training clean fraction. The three-fold tables
+remain upstream CV, not nested CV of the final corrected model.

@@ -7,6 +7,7 @@ PyTorch implementation in `grace_rul/`.
 - [Final architecture and paper analysis](docs/FINAL_ARCHITECTURE.md)
 - [Training audit, fixes, and cleanup](docs/TRAINING_AUDIT.md)
 - [Current paper integration audit](docs/INTEGRATION_AUDIT_2026-10-14.md)
+- [October 15 repairs and validation limits](docs/REPAIR_VALIDATION_2026-10-15.md)
 - [Improved training and comparison workflow](docs/RESEARCH_TRAINING.md)
 - [Training notebook](GRACE_RUL_all_subsets.ipynb)
 - [Python requirements](requirements.txt)
@@ -36,8 +37,8 @@ SHAP/LIME plots are skipped by default. It explicitly requests
 CUDA and stops if no CUDA GPU is accessible. Full training has a substantial compute
 cost. Set `QUICK_RUN = True` only for a small FD001 execution check; select
 `CONFIG['device'] = 'cpu'` explicitly if that check should use CPU.
-These defaults retain the full training procedure and reduce the scheduled upstream
-fits from 460 to 100: 20 tuning fits and 80 primary/fold fits. Actual runtime savings
+Core training schedules up to 104 upstream
+fits: 24 tuning fits and 80 primary/fold fits. Actual runtime savings
 depend on the model and early stopping. Full training uses stride-1 windows with balanced engine sampling; validation search
 also tries stride 5. Official test predictions use the last observed endpoint per engine.
 
@@ -57,12 +58,16 @@ The default command still includes many temporary fold models. To also run the
 separate comparisons and extended evaluation reports, use:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --benchmarks --extended-evaluation --output-dir artifacts/research_with_reports
+.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_faults_v3
 ```
 
-In the notebook, set `CONFIG['run_matched_benchmarks'] = True` and
-`CONFIG['run_extended_evaluation'] = True` before training to enable these reports.
-Set `RUN_EXPLANATIONS = True` in its configuration cell for optional SHAP/LIME plots.
+In the notebook, set `RUN_PAPER_STUDY = True` before training to enable both reports.
+The individual configuration switches remain available. Paper adaptations receive
+independent validation searches; controlled ablations preserve corruption training
+and the remaining branch/reliability inputs. No-correction and identical selected
+ablations reuse mathematically unchanged weights instead of repeating fits.
+Set `RUN_EXPLANATIONS = True` for local and global SHAP/LIME evidence, or add
+`--explanations` to the training CLI. Full comparisons are expensive and remain optional.
 Website explanations remain available on demand using the saved fitting backgrounds.
 See [research training](docs/RESEARCH_TRAINING.md) for outputs, scope, and CLI options.
 
@@ -103,11 +108,17 @@ Format-3/4 checkpoints and bundles cannot be reused with the
 improved format-5 pipeline; retrain in a fresh directory. The interrupted October
 8 run and its notebook outputs were removed during the October 11 audit.
 
-The corrected simulator uses protocol `persistent-causal-faults-v2`. Fault onset is
+The corrected simulator uses protocol `persistent-causal-faults-v3`. Fault onset is
 sampled at an absolute observed offset from 0 through `fault_start_horizon` (100
 by default). Drift ramps over `drift_ramp_cycles` (100 by default), then holds its
 sampled gain. Fault streams are independent, including mixed faults, so extending
 an engine's unseen future cannot change its already corrupted observations.
+Temporary block faults recur with gaps up to `block_gap_cycles` (50); they no longer
+expire permanently in the first 120 cycles. Fault reports include affected-endpoint
+and damaged-entry fractions plus separate active-fault metrics. Validation uses fixed
+mixed faults independently of the training clean fraction and selects on clean/active
+fault RMSE. Clean-reference supervision, a ten-epoch curriculum, and a 1% clean RMSE
+guard protect the predictor. Use a fresh directory: v2 checkpoints cannot resume v3.
 The observation rows in C-MAPSS represent consecutive cycles.
 
 This changes training data. Start a fresh run directory for checkpoints created

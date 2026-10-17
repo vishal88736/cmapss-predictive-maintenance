@@ -16,7 +16,22 @@ SEARCH_CANDIDATES = [
     ("stronger_recovery", {"generator_reconstruction_loss_weight": .5, "trend_loss_weight": .2}),
     ("protect_intact", {"reconstruction_loss_weight": .5, "identity_loss_weight": 1.}),
     ("without_adversarial", {"adversarial_loss_weight": 0.}),
+    ("more_clean", {"clean_fraction": .5, "clean_rul_loss_weight": .5}),
 ]
+
+
+def comparison_candidates(config):
+    """Equal trial counts with useful, method-specific validation candidates."""
+    common = [("default", {}), ("stride_5", {"window_stride": 5}),
+              ("more_clean", {"clean_fraction": .5, "clean_rul_loss_weight": .5}),
+              ("lower_lr", {"learning_rate": .0005, "joint_learning_rate": .00005})]
+    if config["train_repair"]:
+        # A WGAN comparator must not silently inherit GRACE's zero-adversarial trial.
+        return common + [("paper_context", {"sequence_length": 30}),
+                         ("stronger_reconstruction", {"reconstruction_loss_weight": 2.})]
+    if config["predictor_family"] == "cnn_gru":
+        return common + [("local_20", {"local_length": 20}), ("local_50", {"local_length": 50})]
+    return common + [("context_50", {"sequence_length": 50}), ("context_100", {"sequence_length": 100})]
 
 
 def run_validation_search(project_root, config, output_dir, candidates=None):
@@ -24,10 +39,11 @@ def run_validation_search(project_root, config, output_dir, candidates=None):
     candidates = SEARCH_CANDIDATES if candidates is None else candidates
     if not candidates or len({name for name, _ in candidates}) != len(candidates):
         raise ValueError("Search candidates need distinct names and cannot be empty.")
-    allowed = {"window_stride"} | {key for key in config if key.endswith("_loss_weight")}
+    allowed = {"window_stride", "sequence_length", "local_length", "learning_rate", "repair_learning_rate",
+               "joint_learning_rate", "clean_fraction"} | {key for key in config if key.endswith("_loss_weight")}
     for name, overrides in candidates:
         if not name.replace("_", "").isalnum() or set(overrides) - allowed:
-            raise ValueError("Search may change only loss weights/stride, with safe trial names.")
+            raise ValueError("Search may change only training losses, rates, windows and clean fraction, with safe trial names.")
         validate_training_config({**config, **overrides})
     output.mkdir(parents=True, exist_ok=True)
     rows, selected, audit = [], {}, {}

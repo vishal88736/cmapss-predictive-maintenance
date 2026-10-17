@@ -12,7 +12,8 @@ from .config import ARCHITECTURE, CORRUPTION_PROTOCOL
 
 
 REPORT_OPTIONS = {"progress_interval_seconds", "run_extended_evaluation",
-                  "run_matched_benchmarks", "benchmark_variants"}
+                  "run_matched_benchmarks", "benchmark_variants", "benchmark_tune",
+                  "explanation_examples", "explanation_repeats", "explanation_samples", "background_size"}
 
 
 def _training_config(config):
@@ -32,7 +33,7 @@ def pipeline_identity(train_frame, validation_frame, subset, config, seed):
         values = pd.util.hash_pandas_object(frame, index=False).values.tobytes()
         return hashlib.sha256(values + repr(list(frame.columns)).encode()).hexdigest()
 
-    return {"version": 3, "architecture": ARCHITECTURE, "corruption_protocol": CORRUPTION_PROTOCOL,
+    return {"version": 4, "architecture": ARCHITECTURE, "corruption_protocol": CORRUPTION_PROTOCOL,
             "subset": subset, "seed": int(seed),
             "config": _training_config(config),
             "fit": fingerprint(train_frame), "validation": fingerprint(validation_frame)}

@@ -89,6 +89,15 @@ def evaluation_mode(module):
             child.training = training
 
 
+def branch_objective(model, result, target):
+    names = ["local_prediction", "global_prediction"]
+    if model.config["predictor_family"] == "gated":
+        branch = model.config.get("predictor_branch", "both")
+        names = [name for name in names if branch == "both" or name.startswith(branch)]
+    scale = model.config["target_scale"]
+    return sum(F.mse_loss(result[name] / scale, target / scale) for name in names) / len(names)
+
+
 def objectives(model, batch, critic=None, consistency=True):
     result = model(batch["x"], batch["valid"], use_correction=False)
     valid = batch["valid"].unsqueeze(-1)
@@ -106,20 +115,33 @@ def objectives(model, batch, critic=None, consistency=True):
                  pos_weight=positive_weight, reduction="none") * available).sum() / available.sum().clamp_min(1)
     scale = model.config["target_scale"]
     rul = F.mse_loss(result["base"] / scale, batch["target"] / scale)
-    branch = .5 * (F.mse_loss(result["local_prediction"] / scale, batch["target"] / scale) + F.mse_loss(result["global_prediction"] / scale, batch["target"] / scale))
-    cons = result["base"].sum() * 0
-    if consistency:
-        with torch.no_grad(), evaluation_mode(model):
+    branch = branch_objective(model, result, batch["target"])
+    cons = clean_rul = result["base"].sum() * 0
+    clean_grad = model.config.get("clean_rul_loss_weight", 0.) > 0 and any(p.requires_grad for p in model.predictor.parameters())
+    if consistency or clean_grad:
+        with torch.set_grad_enabled(torch.is_grad_enabled() and clean_grad), evaluation_mode(model):
+            if clean_grad:
+                # A deterministic clean anchor still needs cuDNN RNN training
+                # mode for backward. These recurrent modules have no dropout.
+                for module in model.predictor.modules():
+                    if isinstance(module, torch.nn.RNNBase):
+                        module.train()
             teacher = model(batch["reference"], batch["valid"], use_repair=False, use_correction=False)["base"]
+        if clean_grad:
+            clean_rul = F.mse_loss(teacher / scale, batch["target"] / scale)
+    if consistency:
         available_fraction = result["mask"].sum((1, 2)) / (21 * batch["valid"].sum(1)).clamp_min(1)
         change = (torch.nan_to_num(batch["x"][..., 3:]) - batch["reference"][..., 3:]).abs()
         mild = (available_fraction >= .9) & ((change * available).sum((1, 2)) / available.sum((1, 2)).clamp_min(1) <= .05)
         if bool(mild.any()):
-            cons = F.mse_loss(result["base"][mild] / scale, teacher[mild] / scale)
+            cons = F.mse_loss(result["base"][mild] / scale, teacher[mild].detach() / scale)
     adv = result["base"].sum() * 0 if critic is None else -critic(result["repaired"], batch["reference"][..., :3], batch["valid"]).mean()
     terms = {"rul": rul, "reconstruction": rec, "generator_reconstruction": generator_rec,
              "identity": identity, "detection": detection, "trend": trend,
-             "adversarial": adv, "consistency": cons, "branch": branch}
+             "adversarial": adv, "consistency": cons, "branch": branch, "clean_rul": clean_rul}
+    if not model.config["train_repair"]:
+        for name in ["reconstruction", "generator_reconstruction", "identity", "detection", "trend", "adversarial"]:
+            terms[name] = rul * 0
     loss = sum(model.config[f"{name}_loss_weight"] * value for name, value in terms.items())
     return loss, {**result, "loss_terms": {name: value.detach() for name, value in terms.items()}}
 
@@ -194,8 +216,11 @@ def evaluate(model, dataset, config, fault_thresholds=None, **forward_options):
         tp += int((flags & truth & finite).sum()); fp += int((flags & ~truth & finite).sum())
         fn += int((~flags & truth & finite).sum()); tn += int((~flags & ~truth & finite).sum())
         scores.extend(result["fault_scores"][finite].cpu().tolist()); labels.extend(batch["altered"][finite].cpu().tolist())
-        records.extend({"unit": int(u), "cycle": int(t), "prediction": float(p), "target": float(y), "raw_target": float(r)}
-                       for u, t, p, y, r in zip(batch["unit"], batch["cycle"], result["prediction"], batch["target"], batch["raw_target"]))
+        counts = changed.sum((1, 2)).cpu().tolist()
+        totals = (21 * batch["valid"].sum(1)).cpu().tolist()
+        records.extend({"unit": int(u), "cycle": int(t), "prediction": float(p), "target": float(y), "raw_target": float(r),
+                        "altered_entries": int(c), "valid_sensor_entries": int(n), "active_fault": bool(c)}
+                       for u, t, p, y, r, c, n in zip(batch["unit"], batch["cycle"], result["prediction"], batch["target"], batch["raw_target"], counts, totals))
     report = {**metrics(prediction, target), "reconstruction_RMSE": (rec_squared / rec_count) ** .5 if rec_count else None,
               "reconstruction_MAE": rec_absolute / rec_count if rec_count else None,
               "intact_repair_RMSE": (intact_squared / intact_count) ** .5 if intact_count else 0.,
@@ -206,13 +231,34 @@ def evaluate(model, dataset, config, fault_thresholds=None, **forward_options):
               "fault_F1": 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else None,
               "fault_threshold_scope": "validation-selected" if fault_thresholds is not None else "default 0.5",
               "fault_PR_AUC": float(average_precision_score(labels, scores)) if any(labels) and not all(labels) else None}
-    return report, pd.DataFrame(records)
+    records = pd.DataFrame(records)
+    report.update(exposure_metrics(records))
+    return report, records
+
+
+def exposure_metrics(records, target=None):
+    """Separate observed damage from a scenario's nominal fault/severity label."""
+    active = records.active_fault.to_numpy(bool)
+    target = records.target.to_numpy() if target is None else np.asarray(target)
+    report = {"affected_endpoints": int(active.sum()), "affected_endpoint_fraction": float(active.mean()),
+              "damaged_entry_fraction": int(records.altered_entries.sum()) / max(1, int(records.valid_sensor_entries.sum()))}
+    for label, mask in [("active_fault", active), ("unaffected", ~active)]:
+        report[f"{label}_N"] = int(mask.sum())
+        measured = metrics(records.prediction.to_numpy()[mask], target[mask]) if mask.any() else {}
+        for key in ["RMSE", "MAE", "NASA_Score"]:
+            report[f"{label}_{key}"] = measured.get(key)
+    return report
+
+
+def corrupt_validation_rmse(report):
+    active = report.get("active_fault_RMSE")
+    return report["RMSE"] if active is None else active
 
 
 def validation_score(model, clean_dataset, corrupt_dataset, config, **options):
     clean, _ = evaluate(model, clean_dataset, config, **options)
     damaged, _ = evaluate(model, corrupt_dataset, config, **options)
-    score = .5 * (clean["RMSE"] + damaged["RMSE"])
+    score = .5 * (clean["RMSE"] + corrupt_validation_rmse(damaged))
     if not np.isfinite(score):
         raise FloatingPointError("Non-finite clean/corrupted validation RMSE.")
     return score, clean, damaged
@@ -221,7 +267,10 @@ def validation_score(model, clean_dataset, corrupt_dataset, config, **options):
 def validate_training_config(config):
     for name in ["predictor_epochs", "generator_epochs", "joint_epochs", "correction_epochs",
                  "patience", "batch_size", "gradient_penalty_batch_size", "critic_steps",
-                 "validation_prefixes", "correction_prefixes", "window_stride", "lr_patience", "bootstrap_samples", "drift_ramp_cycles"]:
+                 "validation_prefixes", "correction_prefixes", "window_stride", "lr_patience", "bootstrap_samples", "drift_ramp_cycles",
+                 "block_gap_cycles", "curriculum_epochs", "sequence_length", "local_length", "background_size",
+                 "explanation_examples", "explanation_repeats", "explanation_samples", "transformer_dim", "transformer_heads",
+                 "transformer_layers", "generator_hidden", "generator_layers", "cnn_channels", "gru_hidden", "oof_folds"]:
         value = config[name]
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(f"{name} must be a positive integer.")
@@ -238,11 +287,13 @@ def validate_training_config(config):
     if not config["correction_bounds"] or any(not np.isfinite(b) or b <= 0 for b in config["correction_bounds"]):
         raise ValueError("correction_bounds must contain finite positive bounds.")
     for name in ["learning_rate", "repair_learning_rate", "joint_learning_rate", "minimum_learning_rate",
-                 "correction_bound", "detector_positive_weight_cap"]:
+                 "correction_bound", "detector_positive_weight_cap", "target_scale", "train_rul_cap"]:
         if not np.isfinite(config[name]) or config[name] <= 0:
             raise ValueError(f"{name} must be finite and positive.")
     if config["detector_positive_weight_cap"] < 1:
         raise ValueError("detector_positive_weight_cap must be at least one.")
+    if config["oof_folds"] < 2:
+        raise ValueError("oof_folds must be at least two.")
     seeds = config["seeds"]
     if not seeds or len(set(seeds)) != len(seeds) or any(isinstance(s, bool) or not isinstance(s, int) or s < 0 for s in seeds):
         raise ValueError("seeds must contain distinct nonnegative integers.")
@@ -251,10 +302,22 @@ def validate_training_config(config):
         raise ValueError("subsets must contain distinct supported C-MAPSS subsets.")
     if config["predictor_family"] not in {"gated", "cnn_gru", "cnn_lstm", "transformer"}:
         raise ValueError("Unsupported predictor_family.")
+    if config["predictor_branch"] not in {"both", "local", "global"}:
+        raise ValueError("Unsupported predictor_branch.")
+    if config["local_length"] > config["sequence_length"] or not 0 <= config["clean_fraction"] < 1:
+        raise ValueError("Invalid local window length or clean fraction.")
+    for name in ["train_repair", "train_corrupted_predictor", "equal_fusion", "benchmark_tune"]:
+        if not isinstance(config[name], bool):
+            raise ValueError(f"{name} must be a boolean.")
+    if config["transformer_dim"] % 2 or config["transformer_dim"] % config["transformer_heads"]:
+        raise ValueError("Transformer dimension must be even and divisible by its head count.")
 
 
 def acceptable_checkpoint(clean, damaged, clean_reference, config):
-    return (clean["RMSE"] <= clean_reference * (1 + config["max_clean_rmse_increase"]) and
+    clean_ok = clean["RMSE"] <= clean_reference * (1 + config["max_clean_rmse_increase"])
+    if not config["train_repair"]:
+        return clean_ok
+    return (clean_ok and
             damaged.get("intact_repair_RMSE", 0.) <= config["max_intact_repair_rmse"] and
             (damaged.get("reconstruction_RMSE") or 0.) <= config["max_reconstruction_rmse"])
 
@@ -288,7 +351,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
     model, critic = GraceRUL(config).to(device), TemporalCritic(config).to(device)
     train = WindowDataset(train_frame, scaler, config, seed=seed)
     clean_validation = WindowDataset(validation_frame, scaler, config, mode="validation", seed=config["validation_seed"], family="clean")
-    corrupt_validation = WindowDataset(validation_frame, scaler, config, mode="validation", seed=config["validation_seed"])
+    corrupt_validation = WindowDataset(validation_frame, scaler, config, mode="validation", seed=config["validation_seed"], family="mixed")
     history, best_score, clean_reference = [], float("inf"), float("inf")
     if checkpoint:
         model.load_state_dict(checkpoint["model"])
@@ -297,13 +360,22 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
         clean_reference = checkpoint["clean_reference"]
         restore_random_state(checkpoint["random_state"])
         progress.emit(f"resuming checkpoint: {checkpoint['stage']} epoch {checkpoint['next_epoch']} completed", force=True)
-    stages = ["predictor", "generator", "joint"] if config["train_repair"] else ["predictor"]
+    stages = ["predictor"]
+    if config["train_repair"]:
+        stages.append("generator")
+    if config["train_corrupted_predictor"]:
+        stages.append("joint")
     for stage_index, stage in enumerate(stages):
         if checkpoint and (stage_index < checkpoint["stage_index"] or
                            (stage_index == checkpoint["stage_index"] and checkpoint["stage_complete"])):
             continue
         for name, parameter in model.named_parameters():
-            enabled = name.startswith("predictor") if stage == "predictor" else name.startswith(("detector", "generator")) if stage == "generator" else not name.startswith("corrector")
+            if stage == "predictor" or not config["train_repair"]:
+                enabled = name.startswith("predictor")
+            elif stage == "generator":
+                enabled = name.startswith(("detector", "generator"))
+            else:
+                enabled = not name.startswith("corrector")
             parameter.requires_grad_(enabled)
         lr = config["learning_rate"] if stage == "predictor" else config["repair_learning_rate"] if stage == "generator" else config["joint_learning_rate"]
         optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=lr, weight_decay=.01)
@@ -327,8 +399,8 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
         total_epochs = config[f"{stage}_epochs"]
         for epoch in range(start_epoch, total_epochs):
             started = time.perf_counter()
-            model.train(); train.set_epoch(epoch, (epoch + 1) / max(1, config[f"{stage}_epochs"]))
-            model.repair_enabled.fill_(True)
+            model.train(); train.set_epoch(epoch, min(1., (epoch + 1) / min(config["curriculum_epochs"], total_epochs)))
+            model.repair_enabled.fill_(config["train_repair"])
             if stage == "generator":
                 model.predictor.eval()
                 # cuDNN GRU backward to generator inputs needs training mode;
@@ -337,7 +409,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                     if isinstance(module, torch.nn.RNNBase):
                         module.train()
             losses = []
-            adversarial = stage != "predictor" and epoch >= config["adversarial_warmup"] and config["adversarial_loss_weight"] > 0
+            adversarial = config["train_repair"] and stage != "predictor" and epoch >= config["adversarial_warmup"] and config["adversarial_loss_weight"] > 0
             term_totals = {}
             batches = loader(train, config, shuffle=True, seed=seed + epoch)
             total_batches = min(len(batches), config.get("maximum_batches") or len(batches))
@@ -357,7 +429,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                 if stage == "predictor":
                     result = model(batch["reference"], batch["valid"], use_repair=False, use_correction=False)
                     scale = config["target_scale"]
-                    loss = config["rul_loss_weight"] * F.mse_loss(result["base"] / scale, batch["target"] / scale) + .5 * config["branch_loss_weight"] * (F.mse_loss(result["local_prediction"] / scale, batch["target"] / scale) + F.mse_loss(result["global_prediction"] / scale, batch["target"] / scale))
+                    loss = config["rul_loss_weight"] * F.mse_loss(result["base"] / scale, batch["target"] / scale) + config["branch_loss_weight"] * branch_objective(model, result, batch["target"])
                 else:
                     loss, result = objectives(model, batch, critic if adversarial else None)
                     for name, value in result["loss_terms"].items():
@@ -373,7 +445,9 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                                                      use_repair=stage != "predictor", use_correction=False)
             accepted = stage == "predictor" or acceptable_checkpoint(clean, damaged, clean_reference, config)
             row = {"subset": subset, "seed": seed, "stage": stage, "epoch": epoch + 1, "train_loss": float(np.mean(losses)),
-                   "validation_macro_RMSE": score, "validation_clean_RMSE": clean["RMSE"], "validation_corrupt_RMSE": damaged["RMSE"], "validation_reconstruction_RMSE": damaged["reconstruction_RMSE"],
+                   "validation_macro_RMSE": score, "validation_clean_RMSE": clean["RMSE"],
+                   "validation_corrupt_RMSE": corrupt_validation_rmse(damaged), "validation_corrupt_all_RMSE": damaged["RMSE"],
+                   "validation_affected_endpoint_fraction": damaged.get("affected_endpoint_fraction"), "validation_reconstruction_RMSE": damaged["reconstruction_RMSE"],
                    "validation_intact_repair_RMSE": damaged.get("intact_repair_RMSE", 0.),
                    "checkpoint_accepted": accepted, "learning_rate": optimizer.param_groups[0]["lr"],
                    "duration_seconds": time.perf_counter() - started,
@@ -406,6 +480,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
         model.repair_enabled.fill_(False)
     for p in model.parameters():
         p.requires_grad_(True)
+    model.pretrained_clean_rmse = float(clean_reference)
     return model.eval(), scaler, pd.DataFrame(history), best_score
 
 
@@ -431,13 +506,13 @@ def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, c
         for family in ["clean", "mixed"]:
             progress.emit(f"OOF fold {fold + 1}/{config['oof_folds']}: evaluating held-out {family} engines", force=True)
             held_dataset = WindowDataset(fit_frame[fit_frame.unit.isin(held)], fold_scaler, config,
-                                         mode="validation", seed=seed + fold, family="clean" if family == "clean" else None)
+                                         mode="validation", seed=seed + fold, family=family)
             cv_report, _ = evaluate(fold_model, held_dataset, config, use_correction=False)
             cv_reports.append({"subset": subset, "seed": seed, "fold": fold + 1, "family": family,
                                "scope": "engine-held-out detector/recovery/predictor; final corrector excluded", **cv_report})
         progress.emit(f"OOF fold {fold + 1}/{config['oof_folds']}: collecting correction features", force=True)
         with torch.no_grad():
-            for family in ["clean", None]:
+            for family in ["clean", "mixed"]:
                 dataset = WindowDataset(fit_frame[fit_frame.unit.isin(held)], fold_scaler, config,
                                         mode="correction", seed=seed + fold, family=family)
                 for batch in loader(dataset, config):
@@ -453,10 +528,12 @@ def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, c
     for p in model.corrector.parameters():
         p.requires_grad_(True)
     # The final model's scaler is attached explicitly by the caller.
-    val = WindowDataset(validation_frame, model.scaler, config, mode="validation", seed=config["validation_seed"])
+    val = WindowDataset(validation_frame, model.scaler, config, mode="validation", seed=config["validation_seed"], family="mixed")
     clean_val = WindowDataset(validation_frame, model.scaler, config, mode="validation", seed=config["validation_seed"], family="clean")
     best_score, clean, damaged = validation_score(model, clean_val, val, config, use_correction=False)
-    clean_reference = clean["RMSE"]
+    # Keep the final pipeline within the same original clean-predictor guard;
+    # successive stages must not each spend another copy of the tolerance.
+    clean_reference = min(clean["RMSE"], getattr(model, "pretrained_clean_rmse", clean["RMSE"]))
     # Retain a zero-correction candidate if every trained candidate is worse.
     torch.nn.init.zeros_(model.corrector[-1].weight)
     torch.nn.init.zeros_(model.corrector[-1].bias)
@@ -464,7 +541,7 @@ def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, c
     best, best_bound = copy.deepcopy(initial), float(model.correction_bound)
     history = [{"subset": subset, "seed": seed, "epoch": 0, "train_loss": None,
                 "validation_macro_RMSE": best_score, "validation_clean_RMSE": clean["RMSE"],
-                "validation_corrupt_RMSE": damaged["RMSE"], "checkpoint_accepted": True,
+                "validation_corrupt_RMSE": corrupt_validation_rmse(damaged), "checkpoint_accepted": True,
                 "learning_rate": config["learning_rate"], "correction_bound": best_bound}]
     for bound in config["correction_bounds"]:
         model.corrector.load_state_dict(initial)
@@ -484,7 +561,7 @@ def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, c
             accepted = clean["RMSE"] <= clean_reference * (1 + config["max_clean_rmse_increase"])
             history.append({"subset": subset, "seed": seed, "epoch": epoch + 1, "train_loss": float(loss.detach()),
                             "validation_macro_RMSE": score, "validation_clean_RMSE": clean["RMSE"],
-                            "validation_corrupt_RMSE": damaged["RMSE"], "checkpoint_accepted": accepted,
+                            "validation_corrupt_RMSE": corrupt_validation_rmse(damaged), "checkpoint_accepted": accepted,
                             "learning_rate": optimizer.param_groups[0]["lr"], "correction_bound": float(bound)})
             progress.emit(f"corrector bound={bound} epoch={epoch + 1}: loss={float(loss.detach()):.4f}, validation RMSE={score:.3f}", force=True)
             if accepted and score < trial_best:
