@@ -4,7 +4,8 @@ Corrupt sensor data during training, detect damaged readings, recover degradatio
 signals, and predict remaining useful life. The notebook and website share one
 PyTorch implementation in `grace_rul/`.
 
-- [Final architecture and paper analysis](docs/FINAL_ARCHITECTURE.md)
+- [Current format-6 recovery repair and training commands](docs/RECOVERY_V6.md)
+- [Earlier design rationale and paper analysis](docs/FINAL_ARCHITECTURE.md)
 - [Training audit, fixes, and cleanup](docs/TRAINING_AUDIT.md)
 - [Current paper integration audit](docs/INTEGRATION_AUDIT_2026-10-14.md)
 - [October 15 repairs and validation limits](docs/REPAIR_VALIDATION_2026-10-15.md)
@@ -12,6 +13,24 @@ PyTorch implementation in `grace_rul/`.
 - [Training notebook](GRACE_RUL_all_subsets.ipynb)
 - [Python requirements](requirements.txt)
 - [Website instructions](website/README.md)
+
+
+## Recovery stability check
+
+Format 6 addresses extreme stuck-sensor z-scores and rejected recovery discarding
+joint predictor/detector learning. Existing trained results remain a format-5
+baseline; improved format-6 accuracy still needs a fresh run. Source-only publishing
+excludes training runs, checkpoints, generated figures and saved result tables.
+
+```bash
+source minor/bin/activate
+python scripts/check_recovery_fix.py --pilot --device cpu
+```
+
+This limited pilot uses only fitting/validation engines from training files, with
+full tensor dimensions and small budgets. Use CUDA for full training. Detailed
+changes, uncompressed-error guards, compatibility and commands are in
+[RECOVERY_V6.md](docs/RECOVERY_V6.md).
 
 ## Environment and notebook
 
@@ -45,7 +64,7 @@ also tries stride 5. Official test predictions use the last observed endpoint pe
 The same workflow is available without a notebook:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v5
+.venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v6
 ```
 
 For a small CPU check including tuning and trained comparisons:
@@ -58,7 +77,7 @@ The default command still includes many temporary fold models. To also run the
 separate comparisons and extended evaluation reports, use:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_faults_v3
+.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_v6_paper_study
 ```
 
 In the notebook, set `RUN_PAPER_STUDY = True` before training to enable both reports.
@@ -81,9 +100,9 @@ upstream models per seed, so a pause after an epoch line can be a fold transitio
 WGAN-GP starts after the five-epoch warmup and takes longer than predictor training.
 Early stopping restores the best admissible validation weights. Learning-rate
 reduction adapts to validation plateaus. Repair checkpoints must protect clean RUL
-accuracy and intact readings while meeting reconstruction limits. The clean predictor
-is retained with repair bypassed if repair cannot improve within those limits.
-Joint fine-tuning can retain the selected repair-stage checkpoint. Recurrent WGAN-GP
+accuracy and intact readings while meeting reconstruction limits. Joint training also supervises and validates the bypassed predictor independently.
+A safe bypass can be retained when repair is rejected. Recovery training weights
+warm-start joint optimization while the deployable fallback is preserved separately. Recurrent WGAN-GP
 uses a random sub-batch of up to 16 for gradient penalty while its Wasserstein
 term uses the full batch; configure `gradient_penalty_batch_size` to change this.
 
@@ -104,8 +123,8 @@ loaded; correction features, the small residual corrector, and evaluations are
 recomputed. A changed training configuration, architecture, or engine data requires
 a new run directory. Report switches can change without invalidating completed
 upstream epochs; rerun with the same output directory to reuse them.
-Format-3/4 checkpoints and bundles cannot be reused with the
-improved format-5 pipeline; retrain in a fresh directory. The interrupted October
+Format-6 training requires a fresh directory. Format-5 bundles remain readable
+for inference; format-3/4 bundles remain incompatible. The interrupted October
 8 run and its notebook outputs were removed during the October 11 audit.
 
 The simulator uses protocol `structured-sensor-faults-v4`: burst dropouts,
@@ -131,8 +150,9 @@ The observation rows in C-MAPSS represent consecutive cycles.
 
 This changes training data. Start a fresh run directory for checkpoints created
 before this correction; the new training identity rejects the earlier protocol.
-Bundle format 5 and model tensor shapes are unchanged, and earlier format-5 bundles
-remain loadable for inference. Their results describe the earlier simulator.
+Format 6 adds invertible asinh inputs, robust recovery objectives, class-balanced
+finite-fault supervision, and independent bypass validation. Earlier format-5 bundles
+remain loadable with their original preprocessing and training semantics.
 New bundles and run manifests record the corruption protocol explicitly.
 
 ## What the notebook implements
@@ -142,6 +162,8 @@ New bundles and run manifests record the corruption protocol explicitly.
    fitting / 8% calibration / 20% validation. Integer-engine rounding applies.
    Fit operating-regime normalization and sensor resolution floors only on fitting engines. FD002/FD004 use
    six setting-based regimes with separate sensor statistics; FD001/FD003 use one.
+   Apply invertible asinh compression to sensor z-scores; physical faults retain
+   their original magnitudes and are encoded only after application.
 2. Introduce intermittent loss, outage, blocks, noise, bias, drift, and mixed faults
    on trajectories before building windows, retaining unmodified examples.
 3. Train the detector, selective residual BiLSTM recovery, conditional WGAN-GP critic,
@@ -179,8 +201,8 @@ cd ..
 ```
 
 Open <http://127.0.0.1:8000>. A visible placeholder accepts upload previews while
-training is pending. Full format-5 bundles are discovered automatically after
-training. The model page displays only results recorded by the connected run.
+training is pending. Supported full format-5/6 bundles are discovered automatically after
+training; status identifies the loaded format. The model page displays only results recorded by the connected run.
 Sensor reports show affected cycles, scores and thresholds, recovered readings,
 and on-demand SHAP/LIME explanations. Quick artifacts are excluded from automatic
 discovery. [Explicit selection](website/README.md#model-bundle) labels them as quick

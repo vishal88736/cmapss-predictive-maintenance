@@ -1,5 +1,12 @@
 # Finalized research architecture: GRACE-RUL
 
+**26 October 2026 reading note:** this file preserves the earlier design and
+three-paper analysis, including proposed experiments. The current format-6
+preprocessing, loss and checkpoint repairs are documented in [RECOVERY_V6.md](RECOVERY_V6.md).
+The completed format-5 run remains a frozen local baseline. Earlier proposed
+limits and statements about unexecuted training below are historical, not the
+current runtime specification. Generated result archives are excluded from source publishing.
+
 Generative Recovery and Adaptive Correction for Engine Remaining Useful Life
 
 Design finalized: 8 October 2026; training audit and revisions: 11 October 2026.

@@ -1,7 +1,11 @@
 """Serializable configuration shared by the notebook and website."""
 
-FORMAT_VERSION = 5
-ARCHITECTURE = "detector-residual-bilstm-wgan-gated-cnn-gru-transformer-residual-v5"
+FORMAT_VERSION = 6
+ARCHITECTURE = "asinh-balanced-recovery-gated-cnn-gru-transformer-residual-v6"
+SUPPORTED_ARCHITECTURES = {
+    5: "detector-residual-bilstm-wgan-gated-cnn-gru-transformer-residual-v5",
+    FORMAT_VERSION: ARCHITECTURE,
+}
 CORRUPTION_PROTOCOL = "structured-sensor-faults-v4"
 SETTINGS = [f"setting_{i}" for i in range(1, 4)]
 SENSORS = [f"sensor_{i}" for i in range(1, 22)]
@@ -14,6 +18,9 @@ DEFAULT_CONFIG = {
     "calibration_fraction_of_training": 0.10,
     "subsets": SUBSETS, "sequence_length": 70, "local_length": 30,
     "target_scale": 125.0, "train_rul_cap": 125.0, "generator_hidden": 64,
+    "sensor_transform": "asinh", "sensor_transform_scale": 1.0,
+    "repair_loss": "smooth_l1", "repair_huber_beta": 1.0,
+    "detector_loss": "balanced", "validate_bypass": True,
     "generator_layers": 2, "cnn_channels": 32, "gru_hidden": 64,
     "transformer_dim": 64, "transformer_heads": 4, "transformer_layers": 2,
     "dropout": 0.2, "correction_bound": 15.0, "correction_penalty": 0.02,
@@ -36,9 +43,11 @@ DEFAULT_CONFIG = {
     "trend_loss_weight": 0.1, "adversarial_loss_weight": 0.01,
     "consistency_loss_weight": 0.1, "branch_loss_weight": 0.1,
     "clean_rul_loss_weight": 0.25,
+    "bypass_rul_loss_weight": 0.5,
     "lr_factor": 0.5, "lr_patience": 5, "minimum_learning_rate": 0.000001,
     "max_clean_rmse_increase": 0.01, "max_intact_repair_rmse": 0.15,
     "max_reconstruction_rmse": 1.5,
+    "max_linear_reconstruction_ratio": 1.0,
     "predictor_family": "gated", "predictor_branch": "both", "equal_fusion": False,
     "train_repair": True,
     "tune_before_training": True, "run_matched_benchmarks": False,

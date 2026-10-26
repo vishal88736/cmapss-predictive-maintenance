@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from .config import ARCHITECTURE, CORRUPTION_PROTOCOL, FEATURE_COLUMNS, FORMAT_VERSION
+from .config import ARCHITECTURE, CORRUPTION_PROTOCOL, FEATURE_COLUMNS, FORMAT_VERSION, SUPPORTED_ARCHITECTURES
 from .data import FAULTS, WindowDataset, load_subset, select_background_indices, source_hashes, split_engines
 from .training import calibrate, device_for, evaluate, exposure_metrics, fit_corrector, fit_pipeline, interval_bounds, metrics, select_fault_thresholds
 from .training import _Progress, validate_training_config
@@ -158,9 +158,12 @@ def run_experiment(project_root, config, output_dir=None):
 def load_bundle(path, device="cpu"):
     from .data import OperatingRegimeScaler
     from .model import GraceRUL
+    from .normalization import transform_spec
     bundle = torch.load(path, map_location="cpu", weights_only=True)
-    if bundle.get("format_version") != FORMAT_VERSION or bundle.get("architecture") != ARCHITECTURE or bundle.get("feature_columns") != FEATURE_COLUMNS:
-        raise ValueError(f"Expected a GRACE-RUL format-{FORMAT_VERSION} artifact. Legacy bundles are incompatible; retrain with the current pipeline.")
+    if (bundle.get("format_version") not in SUPPORTED_ARCHITECTURES or
+            bundle.get("architecture") != SUPPORTED_ARCHITECTURES.get(bundle.get("format_version")) or
+            bundle.get("feature_columns") != FEATURE_COLUMNS):
+        raise ValueError(f"Expected a GRACE-RUL format-{FORMAT_VERSION} or supported format-5 artifact. Legacy formats below 5 are incompatible.")
     if set(bundle["models"]) != set(bundle["config"]["subsets"]):
         raise ValueError("Bundle subsets do not match its configuration.")
     loaded = {}
@@ -172,6 +175,8 @@ def load_bundle(path, device="cpu"):
         if not np.isfinite([calibration["lower_offset"], calibration["upper_offset"]]).all() or calibration["lower_offset"] > calibration["upper_offset"]:
             raise ValueError("Invalid empirical interval calibration.")
         model = GraceRUL(entry.get("training_config", bundle["config"])).to(device)
+        if transform_spec(entry["scaler"]) != transform_spec(model.config):
+            raise ValueError("Saved scaler and model sensor representations disagree.")
         model.load_state_dict(entry["state_dict"], strict=True)
         if not all(bool(torch.isfinite(p).all()) for p in model.parameters()):
             raise ValueError("Non-finite model weights.")

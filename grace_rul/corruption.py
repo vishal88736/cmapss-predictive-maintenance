@@ -8,6 +8,7 @@ enter the simulator. See docs/STRUCTURED_SENSOR_FAULTS.md for equations and limi
 import numpy as np
 
 from .config import CORRUPTION_PROTOCOL, SENSORS
+from .normalization import decode_sensors, encode_sensors, transform_spec
 
 FAULTS = ["intermittent", "outage", "block", "noise", "bias", "drift", "stuck"]
 
@@ -91,7 +92,7 @@ def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=
         raise ValueError("noise_autocorrelation must be finite and in [0, 1).")
     if not np.isfinite(transition_gain) or not 0 <= transition_gain <= 3:
         raise ValueError("transition_gain must be finite and in [0, 3].")
-    if not np.isfinite(severity) or not 0 < severity <= .5:
+    if not np.isfinite(severity) or not (0 < severity <= .5 or (family == "clean" and severity == 0)):
         raise ValueError("severity must be finite and in (0, .5].")
     if not np.isfinite(clean_fraction) or not 0 <= clean_fraction <= 1:
         raise ValueError("clean_fraction must be in [0, 1].")
@@ -103,14 +104,28 @@ def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=
     if (reference.ndim != 2 or reference.shape[1] != 24 or not len(reference) or
             reference.dtype.kind != "f" or not np.isfinite(reference).all()):
         raise ValueError("Reference must be a nonempty finite floating array with 24 columns.")
-    x = reference.copy()
+    compressed = transform_spec(profile)[0] == "asinh"
+    # Fault equations retain the original linear z-score/raw-unit semantics.
+    # Compression is an invertible model representation, not a smaller fault.
+    linear_reference = reference.astype(np.float64) if compressed else reference
+    if compressed:
+        linear_reference[:, 3:] = decode_sensors(reference[:, 3:], profile)
+    x = linear_reference.copy()
     metadata = {"protocol": CORRUPTION_PROTOCOL, "requested_family": family, "mechanisms": [],
                 "domain": None, "channels": [], "onset_observed_offset": None,
                 "scale_source": "fitting_engines" if profile is not None else "unit_scale_synthetic_reference"}
 
     def result():
-        altered = x[:, 3:] != reference[:, 3:]
-        return (x, altered, metadata) if return_metadata else (x, altered)
+        if compressed:
+            changed = x[:, 3:] != linear_reference[:, 3:]
+            output = reference.copy()
+            # Do not round-trip intact values: their exact stored bits and
+            # changed-entry labels must survive simulation unchanged.
+            output[:, 3:][changed] = encode_sensors(x[:, 3:], profile)[changed]
+        else:
+            output = x
+        altered = output[:, 3:] != reference[:, 3:]
+        return (output, altered, metadata) if return_metadata else (output, altered)
 
     if family == "clean" or (family is None and rng.random() < clean_fraction):
         return result()
@@ -196,7 +211,7 @@ def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=
             if active:
                 # Hold the physical reading. Holding a normalized value would
                 # silently change the physical reading when regimes change.
-                held = reference[start, cols] * stds[start, channels] + means[start, channels]
+                held = linear_reference[start, cols] * stds[start, channels] + means[start, channels]
                 x[start + 1:, cols] = (held - means[start + 1:, channels]) / stds[start + 1:, channels]
                 details["held_raw_reading"] = held.tolist()
         metadata["mechanisms"].append(details)

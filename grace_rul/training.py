@@ -13,6 +13,7 @@ from sklearn.metrics import average_precision_score
 from sklearn.model_selection import KFold
 from .data import OperatingRegimeScaler, WindowDataset
 from .model import GraceRUL, TemporalCritic
+from .normalization import transform_spec
 from .checkpoints import load_checkpoint, pipeline_identity, random_state, restore_random_state, save_checkpoint
 
 
@@ -70,11 +71,38 @@ def masked_mse(error, mask):
     return (error.square() * mask).sum() / mask.sum().clamp_min(1)
 
 
-def repair_trend_loss(repaired, reference, altered, valid):
+def masked_repair_loss(error, mask, config):
+    if config.get("repair_loss", "mse") == "mse":
+        return masked_mse(error, mask)
+    values = F.smooth_l1_loss(error, torch.zeros_like(error),
+                              beta=config["repair_huber_beta"], reduction="none")
+    return (values * mask).sum() / mask.sum().clamp_min(1)
+
+
+def finite_fault_loss(logits, altered, available, config):
+    if config.get("detector_loss", "weighted") == "weighted":
+        positives = (altered & available).sum((0, 1))
+        negatives = available.sum((0, 1)) - positives
+        weight = ((negatives + 1) / (positives + 1)).sqrt().clamp(1., config["detector_positive_weight_cap"])
+        values = F.binary_cross_entropy_with_logits(logits, altered.float(), pos_weight=weight, reduction="none")
+        return (values * available).sum() / available.sum().clamp_min(1)
+    # Balance finite positives/negatives within each channel. A rare fault must
+    # not disappear in a window-wide majority of intact readings and commands.
+    values = F.binary_cross_entropy_with_logits(logits, altered.float(), reduction="none")
+    positive, negative = altered & available, ~altered & available
+    np_, nn_ = positive.sum((0, 1)), negative.sum((0, 1))
+    pos = (values * positive).sum((0, 1)) / np_.clamp_min(1)
+    neg = (values * negative).sum((0, 1)) / nn_.clamp_min(1)
+    count = (np_ > 0).float() + (nn_ > 0).float()
+    channel_loss = (pos + neg) / count.clamp_min(1)
+    return (channel_loss * (count > 0)).sum() / (count > 0).sum().clamp_min(1)
+
+
+def repair_trend_loss(repaired, reference, altered, valid, config=None):
     pairs = (valid[:, 1:] & valid[:, :-1]).unsqueeze(-1)
     pairs = pairs & (altered[:, 1:] | altered[:, :-1])
     error = (repaired[:, 1:] - repaired[:, :-1]) - (reference[:, 1:] - reference[:, :-1])
-    return masked_mse(error, pairs)
+    return masked_repair_loss(error, pairs, config or {})
 
 
 @contextmanager
@@ -104,19 +132,15 @@ def objectives(model, batch, critic=None, consistency=True):
     changed = batch["altered"] & valid
     intact = ~batch["altered"] & valid
     error = result["repaired"] - batch["reference"][..., 3:]
-    rec, identity = masked_mse(error, changed), masked_mse(error, intact)
-    generator_rec = masked_mse(result["generated"] - batch["reference"][..., 3:], changed)
-    trend = repair_trend_loss(result["repaired"], batch["reference"][..., 3:], batch["altered"], batch["valid"])
+    rec, identity = masked_repair_loss(error, changed, model.config), masked_mse(error, intact)
+    generator_rec = masked_repair_loss(result["generated"] - batch["reference"][..., 3:], changed, model.config)
+    trend = repair_trend_loss(result["repaired"], batch["reference"][..., 3:], batch["altered"], batch["valid"], model.config)
     available = result["mask"].bool() & valid
-    positives = (batch["altered"] & available).sum((0, 1))
-    negatives = available.sum((0, 1)) - positives
-    positive_weight = ((negatives + 1) / (positives + 1)).sqrt().clamp(1., model.config["detector_positive_weight_cap"])
-    detection = (F.binary_cross_entropy_with_logits(result["logits"], batch["altered"].float(),
-                 pos_weight=positive_weight, reduction="none") * available).sum() / available.sum().clamp_min(1)
+    detection = finite_fault_loss(result["logits"], batch["altered"], available, model.config)
     scale = model.config["target_scale"]
     rul = F.mse_loss(result["base"] / scale, batch["target"] / scale)
     branch = branch_objective(model, result, batch["target"])
-    cons = clean_rul = result["base"].sum() * 0
+    cons = clean_rul = bypass_rul = result["base"].sum() * 0
     clean_grad = model.config.get("clean_rul_loss_weight", 0.) > 0 and any(p.requires_grad for p in model.predictor.parameters())
     if consistency or clean_grad:
         with torch.set_grad_enabled(torch.is_grad_enabled() and clean_grad), evaluation_mode(model):
@@ -135,14 +159,20 @@ def objectives(model, batch, critic=None, consistency=True):
         mild = (available_fraction >= .9) & ((change * available).sum((1, 2)) / available.sum((1, 2)).clamp_min(1) <= .05)
         if bool(mild.any()):
             cons = F.mse_loss(result["base"][mild] / scale, teacher[mild].detach() / scale)
+    if (model.config["train_repair"] and model.config.get("bypass_rul_loss_weight", 0.) > 0 and
+            any(p.requires_grad for p in model.predictor.parameters())):
+        bypass = model(batch["x"], batch["valid"], use_repair=False, use_correction=False)
+        bypass_rul = (F.mse_loss(bypass["base"] / scale, batch["target"] / scale) +
+                      model.config["branch_loss_weight"] * branch_objective(model, bypass, batch["target"]))
     adv = result["base"].sum() * 0 if critic is None else -critic(result["repaired"], batch["reference"][..., :3], batch["valid"]).mean()
     terms = {"rul": rul, "reconstruction": rec, "generator_reconstruction": generator_rec,
              "identity": identity, "detection": detection, "trend": trend,
-             "adversarial": adv, "consistency": cons, "branch": branch, "clean_rul": clean_rul}
+             "adversarial": adv, "consistency": cons, "branch": branch, "clean_rul": clean_rul,
+             "bypass_rul": bypass_rul}
     if not model.config["train_repair"]:
         for name in ["reconstruction", "generator_reconstruction", "identity", "detection", "trend", "adversarial"]:
             terms[name] = rul * 0
-    loss = sum(model.config[f"{name}_loss_weight"] * value for name, value in terms.items())
+    loss = sum(model.config.get(f"{name}_loss_weight", 0.) * value for name, value in terms.items())
     return loss, {**result, "loss_terms": {name: value.detach() for name, value in terms.items()}}
 
 
@@ -197,6 +227,8 @@ def evaluate(model, dataset, config, fault_thresholds=None, **forward_options):
     prediction, target, scores, labels, records = [], [], [], [], []
     rec_squared, rec_count, intact_squared, intact_count = 0., 0, 0., 0
     rec_absolute, intact_absolute, tp, fp, fn, tn = 0., 0., 0, 0, 0, 0
+    linear_rec, linear_input, linear_intact = 0., 0., 0.
+    representation, compression_scale = transform_spec(getattr(dataset, "fault_profile", None))
     for batch in loader(dataset, config):
         batch = move_batch(batch, next(model.parameters()).device)
         result = model(batch["x"], batch["valid"], **forward_options)
@@ -209,6 +241,15 @@ def evaluate(model, dataset, config, fault_thresholds=None, **forward_options):
         absolute = squared.sqrt()
         rec_absolute += float((absolute * changed).sum())
         intact_absolute += float((absolute * intact).sum())
+        def linear(values):
+            values = values.double()
+            return compression_scale * torch.sinh(values / compression_scale) if representation == "asinh" else values
+        linear_reference = linear(batch["reference"][..., 3:])
+        linear_error = linear(result["repaired"]) - linear_reference
+        input_error = linear(result["observed"]) - linear_reference
+        linear_rec += float(linear_error.masked_fill(~changed, 0).square().sum())
+        linear_input += float(input_error.masked_fill(~changed, 0).square().sum())
+        linear_intact += float(linear_error.masked_fill(~intact, 0).square().sum())
         finite = result["mask"].bool() & batch["valid"].unsqueeze(-1)
         thresholds = result["fault_scores"].new_tensor(fault_thresholds if fault_thresholds is not None else [.5] * 21)
         flags = result["fault_scores"] >= thresholds
@@ -225,6 +266,12 @@ def evaluate(model, dataset, config, fault_thresholds=None, **forward_options):
               "reconstruction_MAE": rec_absolute / rec_count if rec_count else None,
               "intact_repair_RMSE": (intact_squared / intact_count) ** .5 if intact_count else 0.,
               "intact_repair_MAE": intact_absolute / intact_count if intact_count else 0.,
+              "sensor_representation": representation,
+              "linear_reconstruction_RMSE": (linear_rec / rec_count) ** .5 if rec_count else None,
+              "linear_input_RMSE": (linear_input / rec_count) ** .5 if rec_count else None,
+              "linear_intact_repair_RMSE": (linear_intact / intact_count) ** .5 if intact_count else 0.,
+              "linear_reconstruction_ratio": ((linear_rec / linear_input) ** .5 if linear_input > 0 else
+                                               0. if linear_rec == 0 else float("inf")),
               "fault_precision": tp / (tp + fp) if tp + fp else None,
               "fault_recall": tp / (tp + fn) if tp + fn else None,
               "fault_false_positive_rate": fp / (fp + tn) if fp + tn else None,
@@ -265,6 +312,15 @@ def validation_score(model, clean_dataset, corrupt_dataset, config, **options):
 
 
 def validate_training_config(config):
+    transform_spec(config)
+    if config.get("repair_loss", "mse") not in {"mse", "smooth_l1"}:
+        raise ValueError("repair_loss must be mse or smooth_l1.")
+    if config.get("detector_loss", "weighted") not in {"weighted", "balanced"}:
+        raise ValueError("detector_loss must be weighted or balanced.")
+    if not isinstance(config.get("validate_bypass", False), bool):
+        raise ValueError("validate_bypass must be a boolean.")
+    if not np.isfinite(config.get("repair_huber_beta", 1.)) or config.get("repair_huber_beta", 1.) <= 0:
+        raise ValueError("repair_huber_beta must be finite and positive.")
     for name in ["predictor_epochs", "generator_epochs", "joint_epochs", "correction_epochs",
                  "patience", "batch_size", "gradient_penalty_batch_size", "critic_steps",
                  "validation_prefixes", "correction_prefixes", "window_stride", "lr_patience", "bootstrap_samples", "drift_ramp_cycles",
@@ -284,7 +340,7 @@ def validate_training_config(config):
         raise ValueError("fault_noise_autocorrelation must be finite and in [0, 1).")
     if not np.isfinite(config["fault_transition_gain"]) or not 0 <= config["fault_transition_gain"] <= 3:
         raise ValueError("fault_transition_gain must be finite and in [0, 3].")
-    for name in [k for k in config if k.endswith("_loss_weight")] + ["max_clean_rmse_increase", "max_intact_repair_rmse", "max_reconstruction_rmse"]:
+    for name in [k for k in config if k.endswith("_loss_weight")] + ["max_clean_rmse_increase", "max_intact_repair_rmse", "max_reconstruction_rmse", "max_linear_reconstruction_ratio"]:
         if not np.isfinite(config[name]) or config[name] < 0:
             raise ValueError(f"{name} must be finite and nonnegative.")
     if config["reconstruction_loss_weight"] <= 0 or config["rul_loss_weight"] <= 0:
@@ -320,12 +376,13 @@ def validate_training_config(config):
         raise ValueError("Transformer dimension must be even and divisible by its head count.")
 
 
-def acceptable_checkpoint(clean, damaged, clean_reference, config):
+def acceptable_checkpoint(clean, damaged, clean_reference, config, *, use_repair=True):
     clean_ok = clean["RMSE"] <= clean_reference * (1 + config["max_clean_rmse_increase"])
-    if not config["train_repair"]:
+    if not config["train_repair"] or not use_repair:
         return clean_ok
     return (clean_ok and
-            damaged.get("intact_repair_RMSE", 0.) <= config["max_intact_repair_rmse"] and
+            damaged.get("linear_intact_repair_RMSE", damaged.get("intact_repair_RMSE", 0.)) <= config["max_intact_repair_rmse"] and
+            damaged.get("linear_reconstruction_ratio", 1.) <= config["max_linear_reconstruction_ratio"] and
             (damaged.get("reconstruction_RMSE") or 0.) <= config["max_reconstruction_rmse"])
 
 
@@ -354,17 +411,20 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
     progress = _Progress(progress_label or f"{subset} seed={seed}", config, verbose)
     identity = pipeline_identity(train_frame, validation_frame, subset, config, seed) if checkpoint_path else None
     checkpoint = load_checkpoint(checkpoint_path, identity)
-    scaler = OperatingRegimeScaler().fit(train_frame, subset, config["split_seed"])
+    scaler = OperatingRegimeScaler().fit(train_frame, subset, config["split_seed"],
+        sensor_transform=config.get("sensor_transform", "linear"), sensor_transform_scale=config.get("sensor_transform_scale", 1.))
     model, critic = GraceRUL(config).to(device), TemporalCritic(config).to(device)
     train = WindowDataset(train_frame, scaler, config, seed=seed)
     clean_validation = WindowDataset(validation_frame, scaler, config, mode="validation", seed=config["validation_seed"], family="clean")
     corrupt_validation = WindowDataset(validation_frame, scaler, config, mode="validation", seed=config["validation_seed"], family="mixed")
     history, best_score, clean_reference = [], float("inf"), float("inf")
+    warm_recovery = None
     if checkpoint:
         model.load_state_dict(checkpoint["model"])
         critic.load_state_dict(checkpoint["critic"])
         history, best_score = checkpoint["history"], checkpoint["best_score"]
         clean_reference = checkpoint["clean_reference"]
+        warm_recovery = checkpoint.get("warm_recovery")
         restore_random_state(checkpoint["random_state"])
         progress.emit(f"resuming checkpoint: {checkpoint['stage']} epoch {checkpoint['next_epoch']} completed", force=True)
     stages = ["predictor"]
@@ -396,6 +456,11 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
             best["repair_enabled"] = torch.tensor(False, device=device)
         best_score = best_score if stage != "predictor" else float("inf")
         stale, start_epoch = 0, 0
+        # Keep the deployable fallback in `best`, but continue optimizing the
+        # detector/generator learned in their dedicated phase. Rejection is an
+        # export decision, not a reason to restart joint recovery from zero.
+        if stage == "joint" and warm_recovery and not (checkpoint and stage_index == checkpoint["stage_index"]):
+            model.load_state_dict({**model.state_dict(), **warm_recovery})
         if checkpoint and stage_index == checkpoint["stage_index"]:
             optimizer.load_state_dict(checkpoint["optimizer"])
             critic_optimizer.load_state_dict(checkpoint["critic_optimizer"])
@@ -451,18 +516,41 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
             score, clean, damaged = validation_score(model, clean_validation, corrupt_validation, config,
                                                      use_repair=stage != "predictor", use_correction=False)
             accepted = stage == "predictor" or acceptable_checkpoint(clean, damaged, clean_reference, config)
+            selected_repair = stage != "predictor" and config["train_repair"]
+            candidate_metrics = {"repair_validation_macro_RMSE": score,
+                                 "repair_checkpoint_accepted": accepted,
+                                 "repair_validation_reconstruction_RMSE": damaged.get("reconstruction_RMSE"),
+                                 "repair_validation_linear_reconstruction_RMSE": damaged.get("linear_reconstruction_RMSE"),
+                                 "repair_validation_linear_reconstruction_ratio": damaged.get("linear_reconstruction_ratio")}
+            if stage == "joint" and config["train_repair"] and config.get("validate_bypass", False):
+                bypass_score, bypass_clean, bypass_damaged = validation_score(
+                    model, clean_validation, corrupt_validation, config, use_repair=False, use_correction=False)
+                bypass_accepted = acceptable_checkpoint(bypass_clean, bypass_damaged, clean_reference, config, use_repair=False)
+                candidate_metrics.update(bypass_validation_macro_RMSE=bypass_score,
+                                         bypass_checkpoint_accepted=bypass_accepted)
+                if bypass_accepted and (not accepted or bypass_score < score):
+                    score, clean, damaged, accepted = bypass_score, bypass_clean, bypass_damaged, True
+                    selected_repair = False
             row = {"subset": subset, "seed": seed, "stage": stage, "epoch": epoch + 1, "train_loss": float(np.mean(losses)),
                    "validation_macro_RMSE": score, "validation_clean_RMSE": clean["RMSE"],
                    "validation_corrupt_RMSE": corrupt_validation_rmse(damaged), "validation_corrupt_all_RMSE": damaged["RMSE"],
                    "validation_affected_endpoint_fraction": damaged.get("affected_endpoint_fraction"), "validation_reconstruction_RMSE": damaged["reconstruction_RMSE"],
                    "validation_intact_repair_RMSE": damaged.get("intact_repair_RMSE", 0.),
+                   "validation_linear_reconstruction_RMSE": damaged.get("linear_reconstruction_RMSE"),
+                   "validation_linear_intact_repair_RMSE": damaged.get("linear_intact_repair_RMSE"),
+                   "validation_linear_reconstruction_ratio": damaged.get("linear_reconstruction_ratio"),
+                   "validation_path": "repair" if selected_repair else "bypass",
+                   "sensor_representation": scaler.state["sensor_transform"],
                    "checkpoint_accepted": accepted, "learning_rate": optimizer.param_groups[0]["lr"],
                    "duration_seconds": time.perf_counter() - started,
+                   **candidate_metrics,
                    **{f"loss_{name}": value / len(losses) for name, value in term_totals.items()}}
             history.append(row)
             progress.emit(f"{stage} {epoch + 1}: loss={row['train_loss']:.4f}, validation RMSE={score:.3f}, elapsed={row['duration_seconds']:.1f}s", force=True)
             if accepted and score < best_score:
                 best_score, best, stale = score, copy.deepcopy(model.state_dict()), 0
+                if stage != "predictor":
+                    best["repair_enabled"] = torch.tensor(selected_repair, device=device)
                 if stage == "predictor":
                     clean_reference = clean["RMSE"]
             else:
@@ -471,6 +559,9 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
             critic_scheduler.step(score)
             stage_complete = stale >= config["patience"] or epoch + 1 == total_epochs
             if stage_complete:
+                if stage == "generator" and not bool(best["repair_enabled"]):
+                    warm_recovery = {name: tensor.detach().clone() for name, tensor in model.state_dict().items()
+                                     if name.startswith(("detector.", "generator."))}
                 model.load_state_dict(best)
             if checkpoint_path:
                 save_checkpoint(checkpoint_path, {"identity": identity, "stage": stage, "stage_index": stage_index,
@@ -478,6 +569,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                     "critic": critic.state_dict(), "optimizer": optimizer.state_dict(), "critic_optimizer": critic_optimizer.state_dict(),
                     "scheduler": scheduler.state_dict(), "critic_scheduler": critic_scheduler.state_dict(),
                     "clean_reference": clean_reference,
+                    "warm_recovery": warm_recovery,
                     "best": best, "best_score": best_score, "stale": stale, "history": history, "random_state": random_state()})
             if stale >= config["patience"]:
                 progress.emit(f"{stage}: early stopping after {stale} epochs without validation improvement; restoring best weights", force=True)

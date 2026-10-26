@@ -10,6 +10,7 @@ from sklearn.cluster import KMeans
 from torch.utils.data import Dataset
 from .config import COLUMNS, SETTINGS, SENSORS
 from .corruption import FAULTS, corrupt_trajectory
+from .normalization import decode_sensors, encode_sensors, transform_spec
 
 
 def load_subset(data_dir, subset):
@@ -77,7 +78,8 @@ class OperatingRegimeScaler:
     def __init__(self, state=None):
         self.state = state
 
-    def fit(self, frame, subset, seed):
+    def fit(self, frame, subset, seed, *, sensor_transform="asinh", sensor_transform_scale=1.):
+        transform_spec({"sensor_transform": sensor_transform, "sensor_transform_scale": sensor_transform_scale})
         settings = frame[SETTINGS].to_numpy(float)
         sm, ss = settings.mean(0), np.maximum(settings.std(0), 1e-6)
         normalized = (settings - sm) / ss
@@ -109,6 +111,7 @@ class OperatingRegimeScaler:
                       "sensor_mean": np.asarray(means).tolist(), "sensor_std": np.asarray(stds).tolist(),
                       "sensor_scale_floor": floors.tolist(),
                       "sensor_fault_scale": fault_scales.tolist(),
+                      "sensor_transform": sensor_transform, "sensor_transform_scale": float(sensor_transform_scale),
                       "fault_scale_method": "median_regime_p10_p90_over_2.563_with_resolution_floor",
                       "fit_units": sorted(int(i) for i in frame.unit.unique())}
         return self
@@ -119,7 +122,15 @@ class OperatingRegimeScaler:
         centers = np.asarray(s["centers"])
         regimes = ((settings[:, None] - centers[None]) ** 2).sum(-1).argmin(1)
         sensors = (frame[SENSORS].to_numpy(float) - np.asarray(s["sensor_mean"])[regimes]) / np.asarray(s["sensor_std"])[regimes]
-        return np.concatenate([settings, sensors], -1).astype(np.float32), regimes
+        return np.concatenate([settings, encode_sensors(sensors, s)], -1).astype(np.float32), regimes
+
+    def inverse_sensors(self, values, regimes):
+        """Restore raw sensor readings for both legacy and compressed bundles."""
+        regimes = np.asarray(regimes, dtype=int)
+        if np.shape(values) != (len(regimes), 21):
+            raise ValueError("Expected 21 sensor values and one regime per observation.")
+        return (decode_sensors(values, self.state) * np.asarray(self.state["sensor_std"])[regimes] +
+                np.asarray(self.state["sensor_mean"])[regimes])
 
 
 def make_window(values, end, length):

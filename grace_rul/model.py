@@ -34,6 +34,15 @@ def last_valid(x, valid):
     return x[torch.arange(len(x), device=x.device), index]
 
 
+def has_finite_fault_detector(model):
+    """Expose updated detector scores independently of the repair-path choice.
+
+    Updated weights establish availability, not detection accuracy. The original
+    zero-weight/constant-score head must not be presented as fault evidence.
+    """
+    return model.config["train_repair"] and bool(torch.count_nonzero(model.detector.head.weight))
+
+
 class FaultDetector(nn.Module):
     def __init__(self, config):
         super().__init__()

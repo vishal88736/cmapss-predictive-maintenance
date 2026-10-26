@@ -1,6 +1,10 @@
 # Improved research training
 
-The format-5 pipeline turns the three papers' ideas into a trainable recovery and
+See [the format-6 recovery repair](RECOVERY_V6.md) for the current stability changes,
+physical-fault preservation, compatibility, validation-only pilot, and fresh-run commands.
+Existing full-run results describe format 5 and must remain labeled as such.
+
+The format-6 pipeline turns the three papers' ideas into a trainable recovery and
 prediction system. Changes improve training signals and model selection; their
 accuracy benefit remains an experimental question.
 
@@ -24,14 +28,18 @@ consistency 0.1, and branch supervision 0.1.
 Additional clean-reference RUL supervision has weight 0.25 during joint training;
 the reference pass disables dropout and contributes gradients only to the predictor.
 The corruption curriculum reaches full difficulty within ten epochs, before the
-default early-stopping patience expires. Detector positive weights use the
-square root of negative/positive counts, bounded between 1 and 5 per channel.
+default early-stopping patience expires. Finite-fault BCE balances positive and
+negative classes within each available sensor channel. Recovery/trend objectives
+use Smooth L1 in invertibly compressed asinh sensor space; identity uses MSE.
 Recovery is accepted only if clean validation RMSE grows at most 1%, intact-entry
-normalized RMSE is at most 0.15, altered-entry RMSE is at most 1.5, and the macro
+original z-score RMSE is at most 0.15, model-space altered-entry RMSE is at most 1.5,
+and the original z-score repaired/input RMSE ratio is at most one, and the macro
 RUL score improves. These initial limits are configurable research choices.
-If no repair candidate passes, the pretrained predictor is retained and the saved
-`repair_enabled` buffer is false. This fallback also lacks trained finite-fault
-detection; the website distinguishes predictor input from recovered readings.
+Joint training additionally supervises the bypassed predictor (weight 0.5) and
+validates it independently. A safe improved bypass can be retained even when
+recovery fails. Last finite detector/generator training weights warm-start joint
+optimization while the safe export state is preserved separately. Bypassed models
+can retain detector updates; constant initialized scores remain unavailable.
 Correction uses the same original clean-predictor reference, preventing consecutive
 stages from each spending another copy of the tolerance, and
 can retain zero correction. The website reports the selected repair status and bounds.
@@ -90,7 +98,7 @@ and [sampling documentation](https://docs.pytorch.org/docs/2.14/data.html).
 ```bash
 bash scripts/setup_env.sh --cuda
 .venv/bin/python scripts/check_cuda.py --training-check
-.venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v5
+.venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v6
 ```
 
 This defaults to FD001–FD004, five seeds, validation search, and three grouped OOF folds.
@@ -106,7 +114,7 @@ for a practical full study. CPU execution requires explicit `--device cpu`.
 For the complete comparison and reporting workflow:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_faults_v3
+.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_v6_paper_study
 ```
 
 The notebook exposes `RUN_PAPER_STUDY = True` and the individual report switches.
@@ -186,8 +194,11 @@ in both compared models' observed windows. The bootstrap retains whole engines a
 their corruption replicates. Acceptance also requires at least 10% active-fault macro
 improvement with a positive lower interval and complete active-scenario coverage.
 
-No full format-5 study is saved in the project's model slot. Verification results
-and the limited FD001 validation pilot are recorded in [VALIDATION.md](VALIDATION.md).
+The full primary format-5 run `full_20261025T211530540186Z` is now saved with all
+four subsets and five seeds; matched paper comparisons remain unexecuted. The generated results and as-trained architecture notes are retained locally;
+those run artifacts are excluded from source-only publishing.
+Earlier verification results and the limited FD001 validation pilot are recorded
+in [VALIDATION.md](VALIDATION.md).
 The v3 repair checks and current neural-validation limitations are recorded in
 [the October 15 repair record](REPAIR_VALIDATION_2026-10-15.md). Fault reports now retain
 capped and official uncapped targets separately, plus active-fault and unaffected

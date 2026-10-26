@@ -1,5 +1,13 @@
 # Structured sensor errors, protocol v4
 
+## Format-6 representation note
+
+Physical fault equations below operate in the original regime z-score/raw-unit
+space. Format 6 wraps this simulation with invertible asinh model features;
+it decodes before applying faults and re-encodes only changed readings. It does
+not shrink the underlying physical fault or change its channel/onset plan.
+Legacy format-5 profiles remain linear. See [RECOVERY_V6.md](RECOVERY_V6.md).
+
 `structured-sensor-faults-v4` replaces unrelated channel corruption and independent
 per-cell noise. The simulator is in `grace_rul/corruption.py`; `WindowDataset` applies
 it to complete observed trajectories before making windows. The notebook previews

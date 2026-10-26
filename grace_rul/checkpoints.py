@@ -33,7 +33,7 @@ def pipeline_identity(train_frame, validation_frame, subset, config, seed):
         values = pd.util.hash_pandas_object(frame, index=False).values.tobytes()
         return hashlib.sha256(values + repr(list(frame.columns)).encode()).hexdigest()
 
-    return {"version": 4, "architecture": ARCHITECTURE, "corruption_protocol": CORRUPTION_PROTOCOL,
+    return {"version": 6, "architecture": ARCHITECTURE, "corruption_protocol": CORRUPTION_PROTOCOL,
             "subset": subset, "seed": int(seed),
             "config": _training_config(config),
             "fit": fingerprint(train_frame), "validation": fingerprint(validation_frame)}

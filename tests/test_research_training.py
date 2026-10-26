@@ -420,9 +420,19 @@ class ResearchTraining(unittest.TestCase):
             with patch.dict("os.environ", {"GRACE_MODEL_PATH": str(path)}):
                 service = InferenceService()
                 status = service.model_report()
+                detector = service.loaded["FD001"]["model"].detector
                 service.loaded["FD001"]["model"].repair_enabled.fill_(False)
                 sample = self.val[self.val.unit == 10].copy()
                 sample["subset"] = "FD001"
+                # Updated detector scores remain available on a bypassed path.
+                with torch.no_grad():
+                    detector.head.weight.fill_(.01)
+                with patch("website.backend.service.explain_window", return_value={"targets": []}) as explain:
+                    service.explain(sample, "FD001", 10, sensor=3)
+                self.assertEqual(explain.call_args.kwargs["target_sensor"], 2)
+                # A constant initialization is not finite-fault evidence.
+                with torch.no_grad():
+                    detector.head.weight.zero_()
                 with patch("website.backend.service.explain_window", return_value={"targets": []}) as explain:
                     report = service.explain(sample, "FD001", 10, sensor=3)
                 self.assertIsNone(explain.call_args.kwargs["target_sensor"])

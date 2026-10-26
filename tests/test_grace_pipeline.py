@@ -176,7 +176,9 @@ class PipelineInvariants(unittest.TestCase):
             hook.remove()
         self.assertTrue(calls[0][0] and calls[0][1])
         self.assertFalse(calls[1][0] or calls[1][1])
-        torch.testing.assert_close(calls[1][2], calls[3][2], rtol=0, atol=0)
+        teachers = [output for training, dropout, output in calls if not training and not dropout]
+        self.assertEqual(len(teachers), 2)
+        torch.testing.assert_close(teachers[0], teachers[1], rtol=0, atol=0)
         self.assertTrue(all(module.training for module in model.modules()))
 
     def test_corrector_ignores_fold_specific_hidden_coordinates(self):
@@ -224,7 +226,7 @@ class PipelineInvariants(unittest.TestCase):
             self.assertFalse(output.exists())
 
     def test_joint_stage_keeps_repair_checkpoint_if_all_updates_worsen(self):
-        config = {**self.config, "maximum_batches": 1, "adversarial_warmup": 10}
+        config = {**self.config, "maximum_batches": 1, "adversarial_warmup": 10, "validate_bypass": False}
         fit, val = self.train[self.train.unit <= 6], self.train[self.train.unit.isin([7, 8])]
         snapshots = []
 
@@ -339,7 +341,8 @@ class PipelineInvariants(unittest.TestCase):
                 def interrupt_validation(*args, **kwargs):
                     nonlocal calls
                     calls += 1
-                    if calls == 5 + 6 * stage_index:
+                    evaluations_per_epoch = 4 if stage == "joint" else 2
+                    if calls == 6 * stage_index + 2 * evaluations_per_epoch + 1:
                         raise KeyboardInterrupt("Interrupted in the third epoch")
                     return evaluate(*args, **kwargs)
 

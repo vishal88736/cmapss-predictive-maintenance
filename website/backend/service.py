@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 import torch
 from grace_rul.artifacts import load_bundle
-from grace_rul.config import DEFAULT_CONFIG, FORMAT_VERSION, SENSOR_NAMES, SENSORS
+from grace_rul.config import DEFAULT_CONFIG, FORMAT_VERSION, SUPPORTED_ARCHITECTURES, SENSOR_NAMES, SENSORS
 from grace_rul.data import make_window
+from grace_rul.model import has_finite_fault_detector
 from grace_rul.explain import explain_window
 from grace_rul.training import interval_bounds
 
@@ -61,7 +62,7 @@ class InferenceService:
         for path in root.glob("*/grace_rul_ALL.pt"):
             try:
                 meta = json.loads((path.parent / "run_manifest.json").read_text())
-                if meta.get("format_version") == FORMAT_VERSION and meta.get("quick_run") is False:
+                if meta.get("format_version") in SUPPORTED_ARCHITECTURES and meta.get("quick_run") is False:
                     candidates.append(path)
             except (OSError, ValueError):
                 continue
@@ -96,7 +97,7 @@ class InferenceService:
                           for name in ["detector", "generator", "predictor", "corrector"]} if ready else None
             return {"ready": ready, "state": "error" if self.load_error else "ready" if ready else "awaiting_model",
                 "message": self.load_error or ("Quick validation model connected; results are execution checks." if quick else "Trained model connected." if ready else "Your model slot is ready. Complete full notebook training to connect the model."),
-                "model_name": "GRACE-RUL", "format_version": FORMAT_VERSION, "bundle_name": self.path.parent.name if self.path else None,
+                "model_name": "GRACE-RUL", "format_version": self.bundle["format_version"] if ready else FORMAT_VERSION, "bundle_name": self.path.parent.name if self.path else None,
                 "mode": "quick" if quick else "trained" if ready else "pending", "device": str(self.device),
                 "config": self.config, "supported_subsets": list(self.loaded) if ready else self.config["subsets"], "parameters": parameters,
                 "selected_correction_bounds": {s: float(e["model"].correction_bound) for s, e in self.loaded.items()},
@@ -154,9 +155,10 @@ class InferenceService:
                 finite = np.isfinite(observed[SENSORS].to_numpy(float))
                 scores = out["fault_scores"][-1, final_valid].cpu().numpy()
                 thresholds = np.asarray(entry["thresholds"])
-                flags = (scores >= thresholds[None]) & finite
+                detection_available = has_finite_fault_detector(model)
+                flags = (scores >= thresholds[None]) & finite & detection_available
                 cycles = observed.cycle.to_numpy()
-                physical = repaired * np.asarray(scaler.state["sensor_std"])[regimes[-len(repaired):]] + np.asarray(scaler.state["sensor_mean"])[regimes[-len(repaired):]]
+                physical = scaler.inverse_sensors(repaired, regimes[-len(repaired):])
                 original = observed[SENSORS].to_numpy(float)
                 sensor_reports = []
                 for j, name in enumerate(SENSORS):
@@ -165,7 +167,7 @@ class InferenceService:
                     delta = np.abs(repaired[:, j] - np.nan_to_num(values[-len(repaired):, 3 + j]))
                     sensor_reports.append({"sensor": name, "name": SENSOR_NAMES[j], "availability": 100 * float(finite[:, j].mean()),
                         "missing": missing, "suspected_cycles": suspected, "status": "missing + suspected" if missing and suspected else "missing" if missing else "suspected" if suspected else "no flag",
-                        "fault_score": float(available_scores.max()) if len(available_scores) else None, "threshold": float(thresholds[j]),
+                        "fault_score": float(available_scores.max()) if detection_available and len(available_scores) else None, "threshold": float(thresholds[j]),
                         "repair_magnitude": float(delta.mean()), "fault_spans": spans(cycles, flags[:, j]), "missing_spans": spans(cycles, ~finite[:, j])})
                 target = group.iloc[-1].get("true_rul", np.nan)
                 truth = float(target) if pd.notna(target) else None
@@ -181,6 +183,7 @@ class InferenceService:
                         model.eval()
                 engines.append({"id": f"{subset}:{unit}", "subset": subset, "unit": int(unit), "last_cycle": int(group.iloc[-1].cycle), "observations": len(group),
                     "recovery_enabled": bool(model.repair_enabled),
+                    "finite_fault_detection_available": detection_available,
                     "predicted_rul": float(prediction[-1]), "base_rul": float(out["base"][-1]), "correction_cycles": float(out["delta"][-1]),
                     "interval_lower": float(lo[-1]), "interval_upper": float(hi[-1]), "interval_width": float(hi[-1] - lo[-1]),
                     "interval_scope": entry["calibration"]["scope"], "mc_std_cycles": mc_std,
@@ -224,11 +227,11 @@ class InferenceService:
                 target = sensor - 1
                 if not np.isfinite(x[valid, 3 + target]).any():
                     raise InputError("This sensor is entirely missing. Its outage is directly observable; choose an available sensor for finite-fault explanations.")
-            recovery_enabled = bool(item["model"].repair_enabled)
-            if not recovery_enabled:
+            detection_available = has_finite_fault_detector(item["model"])
+            if not detection_available:
                 target = None
             result = explain_window(item["model"], x, valid, item["entry"]["background"], item["entry"]["background_valid"],
                                     target_sensor=target, samples=self.config["explanation_samples"], seed=self.config["seed"])
             return clean_json({**result, "engine": f"{subset}:{unit}", "model_bundle": self.path.parent.name,
-                               "note": "SHAP and LIME explain estimated fault scores and RUL. Sensor importance alone does not confirm a fault." if recovery_enabled else
-                                       "Repair is bypassed. SHAP and LIME explain final RUL only; trained finite-fault detection is unavailable."})
+                               "note": "SHAP and LIME explain estimated fault scores and RUL. Sensor importance alone does not confirm a fault." if detection_available else
+                                       "SHAP and LIME explain final RUL only; finite-fault detection is unavailable for this model."})

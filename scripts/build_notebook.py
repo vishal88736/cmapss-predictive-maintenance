@@ -44,6 +44,11 @@ PyTorch must detect an accessible GPU; a CUDA request never silently falls back 
 Set it to `True` only for a small FD001 execution check. Quick artifacts are clearly
 labeled and are not benchmark evidence. A full run has a substantial compute cost.
 Neither this notebook nor its artifact claims superiority before matched experiments.
+
+Format 6 adds invertible asinh sensor compression, robust recovery losses,
+channel/class-balanced finite-fault training, and independently validated joint
+training with recovery bypassed. A new training directory is required. Existing
+format-5 weights remain loadable for inference and baseline comparisons.
 """)
 code("""
 from pathlib import Path
@@ -81,6 +86,9 @@ temporal-trend supervision, and intact-entry identity losses train recovery. Ful
 uses stride-1 windows and balances sampling by engine. Learning-rate reduction and
 clean/intact/reconstruction checkpoint limits are configurable. Joint training includes
 clean-reference RUL supervision and permits at most 1% clean RMSE regression by default.
+It also supervises prediction with recovery bypassed. Joint validation can retain
+that path independently when recovery fails. Recovery must not increase original
+linear sensor error; intact-reading protection is checked before asinh compression.
 The curriculum reaches full fault severity within ten epochs, before default patience expires.
 Corruption labels supervise detection/recovery only; they are never inference features.
 The critic is training-only. Training targets are capped at 125; evaluation reports capped
@@ -183,7 +191,8 @@ train, test, truths = load_subset(PROJECT_ROOT / 'data', subset)
 partition = split_engines(train, CONFIG['split_seed'], CONFIG['maximum_engines'],
                           CONFIG['validation_fraction'], CONFIG['calibration_fraction_of_training'])
 fit = train[train.unit.isin(partition['fit'])]
-scaler = OperatingRegimeScaler().fit(fit, subset, CONFIG['split_seed'])
+scaler = OperatingRegimeScaler().fit(fit, subset, CONFIG['split_seed'],
+    sensor_transform=CONFIG['sensor_transform'], sensor_transform_scale=CONFIG['sensor_transform_scale'])
 # Start the illustrations immediately; training retains its configured onset range.
 DEMO_CONFIG = {**CONFIG, 'fault_start_horizon': 0}
 fig, axes = plt.subplots(4, 2, figsize=(14, 12))
@@ -197,13 +206,12 @@ for family, ax in zip(['intermittent', 'outage', 'block', 'noise', 'bias', 'drif
     j = int(affected[0]) if len(affected) else SENSORS.index(metadata['channels'][0])
     valid = demo['valid'].numpy()
     regimes = demo_data.engines[engine_index]['regimes'][max(0, end-CONFIG['sequence_length']+1):end+1]
-    mu = np.asarray(scaler.state['sensor_mean'])[regimes, j]
-    sd = np.asarray(scaler.state['sensor_std'])[regimes, j]
     for key, label, style in [('reference', 'Reference', '-'), ('x', 'Sensor fault', '--')]:
-        ax.plot(demo[key].numpy()[valid, 3+j] * sd + mu, style, label=label)
+        physical = scaler.inverse_sensors(demo[key].numpy()[valid, 3:], regimes)
+        ax.plot(physical[:, j], style, label=label)
     missing = ~np.isfinite(demo['x'].numpy()[valid, 3+j])
     if missing.any():
-        ax.scatter(np.flatnonzero(missing), (demo['reference'].numpy()[valid, 3+j] * sd + mu)[missing],
+        ax.scatter(np.flatnonzero(missing), scaler.inverse_sensors(demo['reference'].numpy()[valid, 3:], regimes)[missing, j],
                    marker='x', color='red', s=15, label='Unavailable')
     ax.set_title(f'{family}: {metadata["domain"]}, {SENSOR_NAMES[j]}')
     ax.set_xlabel('Observed window position'); ax.set_ylabel('Physical sensor reading'); ax.legend(fontsize=8)
@@ -227,7 +235,9 @@ Progress includes batch counts, validation, and each temporary OOF model's epoch
 WGAN-GP uses up to 16 randomly sampled examples for gradient penalty and the full
 batch for Wasserstein loss. Repair must improve the clean/corrupted validation
 objective within clean-RMSE, intact-repair, and reconstruction limits; otherwise
-the pretrained predictor is retained with repair bypassed. Joint training can retain
+an independently validated predictor is retained with repair bypassed. Recovery
+training weights warm-start joint optimization even when not accepted for export;
+the deployable fallback is preserved separately. Joint training can retain
 the selected repair checkpoint. Correction uses observable summaries and predictions
 across folds, searches bounds of 5/10/15/30 cycles, and retains a zero-correction fallback.
 Final seeds are selected after
@@ -236,10 +246,10 @@ epochs (including OOF models) are saved in the printed run directory's `checkpoi
 To resume after interrupting, restart the kernel and rerun setup/configuration with
 the same settings, then pass that run directory as `output_dir` to `run_experiment`.
 Completed upstream models load from checkpoints; correction and evaluation rerun.
-The corrected `structured-sensor-faults-v4` simulator has a new training identity;
-pre-correction checkpoints require a fresh directory even if their bundle format is 5.
-Older format-3/4 runs are incompatible with the residual-recovery format-5 pipeline and
-require fresh training. The interrupted October 8 artifacts have been removed.
+Format 6 changes preprocessing, losses, and checkpoint selection while preserving
+the physical `structured-sensor-faults-v4` mechanisms. All format-5 training
+checkpoints require a fresh directory. Format-5 bundles remain inference-compatible;
+older format-3/4 bundles are incompatible.
 
 Three-fold metrics evaluate the detector/recovery/predictor on held-out fitting engines
 before the final corrector learns from their out-of-fold targets. Fold-level records
@@ -299,10 +309,10 @@ for name in ['robustness_summary', 'ablation_metrics', 'validation_search', 'tes
 md("""
 ## Reload the exact website artifact and inspect recovery
 
-The format-5 bundle contains weights, selected per-subset settings, repair/bound buffers, correction, sensor thresholds,
+The format-6 bundle contains weights, selected per-subset settings, repair/bound buffers, correction, sensor thresholds,
 empirical interval offsets, fitting-only explanation backgrounds, source hashes, and
-engine split audits. It can be loaded with `weights_only=True`. Legacy artifacts are
-rejected because their architecture differs.
+engine split audits. It can be loaded with `weights_only=True`. Format-5 bundles
+retain their original linear preprocessing; incompatible older artifacts are rejected.
 """)
 code("""
 bundle, loaded = load_bundle(BUNDLE_PATH, device='cpu')

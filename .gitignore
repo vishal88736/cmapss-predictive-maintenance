@@ -64,3 +64,10 @@ Thumbs.db
 
 # Generated training runs, checkpoints, notebook validation, and plot caches
 /artifacts/
+
+# Local minor environment and generated research outputs (source-only publishing)
+/minor/
+/docs/results/
+/docs/figures/
+/docs/diagrams/
+/docs/RESULTS_*.md
