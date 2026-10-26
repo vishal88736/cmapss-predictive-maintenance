@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from .config import ARCHITECTURE, CORRUPTION_PROTOCOL
+from .config import ARCHITECTURE, CORRUPTION_PROTOCOL, FORMAT_VERSION
 
 
 REPORT_OPTIONS = {"progress_interval_seconds", "run_extended_evaluation",
@@ -33,7 +33,7 @@ def pipeline_identity(train_frame, validation_frame, subset, config, seed):
         values = pd.util.hash_pandas_object(frame, index=False).values.tobytes()
         return hashlib.sha256(values + repr(list(frame.columns)).encode()).hexdigest()
 
-    return {"version": 6, "architecture": ARCHITECTURE, "corruption_protocol": CORRUPTION_PROTOCOL,
+    return {"version": FORMAT_VERSION, "architecture": ARCHITECTURE, "corruption_protocol": CORRUPTION_PROTOCOL,
             "subset": subset, "seed": int(seed),
             "config": _training_config(config),
             "fit": fingerprint(train_frame), "validation": fingerprint(validation_frame)}

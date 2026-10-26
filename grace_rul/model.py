@@ -129,6 +129,11 @@ class GraceRUL(nn.Module):
         self.config = dict(config)
         self.register_buffer("repair_enabled", torch.tensor(bool(config["train_repair"])))
         self.register_buffer("correction_bound", torch.tensor(float(config["correction_bound"])))
+        # Legacy artifacts keep their original continuous gate and state keys.
+        # New finite repairs are disabled until training-only validation selects
+        # sensor thresholds. Missing observations still route to the generator.
+        self.register_buffer("finite_repair_thresholds", torch.ones(21),
+            persistent=config.get("finite_repair_gate") == "validated_threshold")
         self.detector = FaultDetector(config)
         self.generator = SensorGenerator(config)
         self.predictor = RULPredictor(config) if config["predictor_family"] == "gated" else SingleBranchPredictor(config)
@@ -148,8 +153,13 @@ class GraceRUL(nn.Module):
         observed = torch.nan_to_num(x[..., 3:], nan=0., posinf=0., neginf=0.) * valid.unsqueeze(-1)
         logits = self.detector(observed, mask, settings, valid) if self.config["train_repair"] else torch.full_like(observed, -20.)
         probabilities = logits.sigmoid()
-        generated = self.generator(observed, mask, probabilities, settings, valid) if use_repair else observed
-        weights = ((1 - mask) + mask * probabilities) * valid.unsqueeze(-1)
+        gate_scores = probabilities.detach() if self.config.get("detach_repair_gate", False) else probabilities
+        generated = self.generator(observed, mask, gate_scores, settings, valid) if use_repair else observed
+        finite_weights = gate_scores
+        if self.config.get("finite_repair_gate") == "validated_threshold":
+            threshold = self.finite_repair_thresholds
+            finite_weights = gate_scores * ((gate_scores >= threshold) & (threshold < 1))
+        weights = ((1 - mask) + mask * finite_weights) * valid.unsqueeze(-1)
         repaired = ((1 - weights) * observed + weights * generated) * valid.unsqueeze(-1) if use_repair else observed
         result = self.predictor(repaired, settings, mask, weights if use_repair else torch.zeros_like(weights), observed, valid, branch, equal_fusion)
         features = torch.cat([result["quality"], result["base"][:, None] / self.config["target_scale"],

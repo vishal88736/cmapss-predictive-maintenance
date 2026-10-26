@@ -23,12 +23,14 @@ def load_subset(data_dir, subset):
     truth = np.loadtxt(root / f"RUL_{subset}.txt", ndmin=1)
     if len(truth) != test.unit.nunique():
         raise ValueError(f"{subset}: RUL count differs from test engine count.")
+    ordered = []
     for frame in [train, test]:
         frame[["unit", "cycle"]] = frame[["unit", "cycle"]].astype(int)
-        frame.sort_values(["unit", "cycle"], inplace=True)
-        frame.reset_index(drop=True, inplace=True)
+        frame = frame.sort_values(["unit", "cycle"]).reset_index(drop=True)
         if frame.duplicated(["unit", "cycle"]).any():
             raise ValueError("Duplicate engine cycles in source data.")
+        ordered.append(frame)
+    train, test = ordered
     return train, test, dict(zip(sorted(test.unit.unique()), truth.tolist()))
 
 

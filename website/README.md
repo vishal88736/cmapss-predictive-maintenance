@@ -24,7 +24,7 @@ The visible model placeholder remains until full training finishes. Upload previ
 and sample downloads work without weights; inference and explanations return a
 clear model-unavailable response. The website never trains inside a web request.
 
-Run the notebook with `QUICK_RUN = False`. Full format-5 bundles under
+Run the notebook with `QUICK_RUN = False`. Full format-5, format-6, and format-7 bundles under
 `artifacts/<run>/grace_rul_ALL.pt` are discovered automatically, with their
 `run_manifest.json`. Refresh the model status to load the newest run.
 
@@ -36,7 +36,7 @@ GRACE_MODEL_PATH="/absolute/path/to/grace_rul_ALL.pt" \
 ```
 
 An explicitly selected quick artifact is labeled **Quick validation model**;
-automatic discovery excludes it. Legacy artifacts have incompatible architecture
+automatic discovery excludes it. Artifacts below format 5 have incompatible architecture
 and are rejected. `models/model_manifest.json` documents the pending model slot
 without pretending to contain trained weights.
 
@@ -48,11 +48,28 @@ Optional environment settings: `GRACE_ARTIFACTS_DIR` selects another artifact ro
 Upload headered CSV or original whitespace-delimited C-MAPSS text. Required columns:
 `unit`, `cycle`, `setting_1`–`setting_3`, and `sensor_1`–`sensor_21`. Blank sensor
 cells indicate missing readings. Choose the subset, or include a `subset` column
-for mixed-subset CSVs. Optional `true_rul` values at engine endpoints enable error
-metrics against those exact uploaded targets. Settings must be complete.
+for mixed-subset CSVs. Each engine must have consecutive integer cycles; a history
+may begin at any positive cycle. Represent missing observations with rows containing
+blank sensors and complete operating settings. Gaps are rejected because model
+timesteps represent consecutive cycles.
 
-The console shows final RUL, bounded correction, local/global gates, empirical
-residual intervals, and optional MC-dropout spread. Sensor reports use the final
+Optional `true_rul` values at engine endpoints represent the raw uploaded truth.
+Reports preserve that truth and expose both capped-target and raw-target metrics
+under `metrics_by_protocol` and `metrics_by_subset_protocol`. The console selects
+between these two evaluation conventions. The legacy `metrics`, `metrics_by_subset`,
+and `error` fields retain raw-target errors and include an explicit protocol label.
+Settings must be complete.
+
+The console shows capped-target RUL, bounded correction, local/global gates,
+target-specific intervals, and optional MC-dropout spread. Each engine reports
+`target_convention` and `train_rul_cap`. The training target is the smaller of raw
+remaining life and this cap. `failure_cycle_proxy` adds the model estimate to the
+last observed cycle; its scope is limited by the capped training target. The
+deprecated `estimated_failure_cycle` key retains the same proxy for existing clients,
+with `estimated_failure_cycle_scope` explaining its meaning. It is not an estimate
+of the physical failure date for engines beyond the training horizon.
+
+Sensor reports use the final
 70 observed positions and show missing/suspected cycles, validation thresholds,
 repair magnitude, and observed/recovered readings in original sensor units.
 
@@ -64,8 +81,18 @@ channel for finite-fault explanations.
 
 The model page uses actual connected-run CSVs. Reported test metrics keep the
 125-cycle capped target convention together; original-target results remain in the
-run directory. Empirical interval calibration uses separate unmodified capped-target
-endpoints, so corrupted-data coverage requires measurement.
+run directory. Interval method, target convention, and scope come from the connected
+calibration metadata. Format-7 bundles calibrate capped and raw targets separately.
+Legacy format-5/6 intervals support capped targets only: raw-target coverage is
+`null` and `Interval_N` is zero rather than reusing an incompatible interval.
+
+An insufficient calibration sample at the requested nominal level can yield an
+unbounded interval. Its lower bound is zero, `interval_upper` and `interval_width`
+are JSON `null`, and `interval_unbounded` is `true`; the console displays `∞`.
+These flags are also included in trajectory and per-target `intervals` records.
+Metrics compute coverage using the actual unbounded interval before JSON encoding.
+Coverage under corruption, different endpoint distributions, and uploaded data
+requires measurement; the displayed nominal level is not observed coverage.
 
 The updated training protocol uses an 80% training pool and 20% validation split
 by complete engine, with 10% of that pool reserved for calibration. FD002/FD004

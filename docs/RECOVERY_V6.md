@@ -1,8 +1,8 @@
 # Format 6: cross-regime sensor recovery repair
 
-This is the current training implementation. The completed format-5 run and its
-paper/results remain a frozen baseline. Format 6 requires a new training directory;
-its accuracy and recovery benefit have not been established by a full run.
+This preserves the format-6 implementation rationale. Current training uses
+[format 7](RECOVERY_V7.md). Completed format-5/6 runs remain frozen local evidence;
+the earlier prospective statements below describe the format-6 development stage.
 
 ## What changed
 

@@ -135,6 +135,9 @@ class CrossRegimeRecovery(unittest.TestCase):
         self.assertFalse(bool(model.repair_enabled))
         self.assertEqual(history.validation_path.tolist(),['bypass','repair','bypass'])
         self.assertFalse(history.iloc[-1].repair_checkpoint_accepted)
+        self.assertEqual(history.iloc[-1].repair_validation_clean_RMSE, 10.)
+        self.assertFalse(history.iloc[-1].repair_guard_reconstruction)
+        self.assertTrue(history.iloc[-1].bypass_guard_clean_rmse)
         for component in ['predictor','detector']:
             self.assertTrue(any(not torch.equal(before[k],v) for k,v in model.state_dict().items() if k.startswith(component)))
 
@@ -142,7 +145,8 @@ class CrossRegimeRecovery(unittest.TestCase):
         seed_all(42)
         config = quick_config({**DEFAULT_CONFIG, "device":"cpu"})
         for key in ['sensor_transform','sensor_transform_scale','repair_loss','repair_huber_beta','detector_loss',
-                    'validate_bypass','bypass_rul_loss_weight','max_linear_reconstruction_ratio']:
+                    'validate_bypass','bypass_rul_loss_weight','max_linear_reconstruction_ratio',
+                    'finite_repair_gate','detach_repair_gate','detector_training','identity_loss_space']:
             config.pop(key)
         model = GraceRUL(config).eval()
         profile = self.profile()
@@ -183,7 +187,13 @@ class CrossRegimeRecovery(unittest.TestCase):
         self.assertEqual(inspected,[True])
         self.assertEqual(score,10.)
         for key,value in before.items():
-            if key!='repair_enabled':torch.testing.assert_close(model.state_dict()[key],value,rtol=0,atol=0)
+            if key.startswith(('predictor.', 'generator.', 'corrector.')):
+                torch.testing.assert_close(model.state_dict()[key],value,rtol=0,atol=0)
+        for key,value in recovery.items():
+            if key.startswith('detector.'):
+                torch.testing.assert_close(model.state_dict()[key],value,rtol=0,atol=0)
+        np.testing.assert_array_equal(model.finite_repair_thresholds.cpu(),
+            np.asarray(model.detector_audit['thresholds'], np.float32))
 
     def test_detector_availability_is_independent_of_recovery_bypass(self):
         model = GraceRUL(quick_config(DEFAULT_CONFIG))

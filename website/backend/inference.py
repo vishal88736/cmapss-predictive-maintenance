@@ -79,7 +79,11 @@ def parse_csv(content, subset):
         raise InputError("Duplicate subset / unit / cycle rows found. Each engine observation must be unique.")
     if frame.groupby(["subset", "unit"]).ngroups > MAX_ENGINES:
         raise InputError("A report can contain up to 1,000 engines.")
-    return frame.sort_values(["subset", "unit", "cycle"]).reset_index(drop=True)
+    frame = frame.sort_values(["subset", "unit", "cycle"]).reset_index(drop=True)
+    gaps = frame.groupby(["subset", "unit"])["cycle"].diff().dropna()
+    if (gaps != 1).any():
+        raise InputError("Each engine history must contain consecutive cycles. Include a row for every missing cycle, with blank sensor readings and complete operating settings.")
+    return frame
 
 
 def _is_number(value):
@@ -116,21 +120,44 @@ def clean_json(value):
     return value
 
 
-def regression_metrics(engines):
+def regression_metrics(engines, protocol="official_uncapped"):
+    """Keep uploaded raw truth separate from the model's capped training target."""
+    if protocol not in {"capped", "official_uncapped"}:
+        raise ValueError("Unknown uploaded-target metric protocol.")
     labeled = [engine for engine in engines if engine["true_rul"] is not None]
     if not labeled:
         return None
     truth = np.asarray([engine["true_rul"] for engine in labeled], dtype=np.float64)
+    caps = np.asarray([engine.get("train_rul_cap", 125.) for engine in labeled], dtype=np.float64)
+    if protocol == "capped":
+        truth = np.minimum(truth, caps)
     predictions = np.asarray([engine["predicted_rul"] for engine in labeled], dtype=np.float64)
     error = predictions - truth
     variance = ((truth - truth.mean()) ** 2).sum()
     with np.errstate(over="ignore"):
         penalties = np.expm1(np.where(error >= 0, error / 10.0, -error / 13.0))
-    covered = [engine["interval_lower"] <= engine["true_rul"] <= engine["interval_upper"] for engine in labeled]
+    intervals = [engine.get("intervals", {}).get(protocol) for engine in labeled]
+    # Old callers supplied only one interval without an explicit target contract.
+    # New reports never apply a capped-only legacy calibration to raw truth.
+    intervals = [interval if "intervals" in engine else {
+        "available": True, "interval_lower": engine["interval_lower"],
+        "interval_upper": engine["interval_upper"], "interval_unbounded": engine.get("interval_unbounded", False)
+    } for engine, interval in zip(labeled, intervals)]
+    covered = []
+    for target, interval in zip(truth, intervals):
+        if not interval or not interval.get("available", False):
+            continue
+        upper = math.inf if interval.get("interval_unbounded", False) else interval["interval_upper"]
+        covered.append(interval["interval_lower"] <= target <= upper)
+    target_convention = (f"capped_{caps[0]:g}" if np.all(caps == caps[0]) else "capped_per_model") if protocol == "capped" else protocol
     return clean_json({
+        "protocol": target_convention, "target_convention": target_convention,
+        "training_horizons": sorted(set(caps.tolist())),
         "N": len(labeled), "RMSE": np.sqrt(np.mean(error ** 2)), "MAE": np.abs(error).mean(),
         "R2": 1 - (error ** 2).sum() / variance if variance > 0 else None,
         "NASA_Score": penalties.sum(), "NASA_Score_Mean": penalties.mean(),
-        "Interval_Coverage": np.mean(covered), "Mean_Error": error.mean(),
+        "Interval_Coverage": np.mean(covered) if covered else None, "Interval_N": len(covered),
+        "Interval_Coverage_Scope": "matching target calibration only; nominal coverage is not guaranteed for uploaded data",
+        "Mean_Error": error.mean(),
         "NASA_Score_Overflow": not bool(np.isfinite(penalties.sum())),
     })

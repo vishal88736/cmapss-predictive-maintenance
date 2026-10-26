@@ -70,8 +70,11 @@ def run_experiment(project_root, config, output_dir=None):
             report, predictions = evaluate(model, test_dataset, config, fault_thresholds=thresholds)
             for protocol, target in [(f"capped_{config['train_rul_cap']:g}", predictions.target), ("official_uncapped", predictions.raw_target)]:
                 row = {"subset": subset, "seed": seed, "protocol": protocol, **metrics(predictions.prediction, target)}
-                lo, hi = interval_bounds(predictions.prediction, calibration)
+                lo, hi = interval_bounds(predictions.prediction, calibration, protocol=protocol)
                 row["Interval_Coverage"] = float(((target >= lo) & (target <= hi)).mean())
+                row["Interval_Method"] = calibration["method"]
+                row["Interval_Policy"] = calibration["endpoint_policy"]
+                row["Interval_Unbounded"] = bool(calibration["protocols"][protocol]["unbounded"])
                 clean_metrics.append(row)
             if config.get("run_extended_evaluation", False):
                 families = ["intermittent", "bias"] if config["quick_run"] else [*FAULTS, "mixed"]
@@ -84,14 +87,17 @@ def run_experiment(project_root, config, output_dir=None):
                             ds = WindowDataset(test, scaler, config, mode="test", seed=config["validation_seed"] + 100000 + replicate, family=family, severity=severity, truths=truths)
                             fault_report, fault_predictions = evaluate(model, ds, config, fault_thresholds=thresholds)
                             progress.emit(f"robustness: {family} severity={severity} replicate={replicate + 1}/{len(replicates)} complete")
-                            lo, hi = interval_bounds(fault_predictions.prediction, calibration)
                             for protocol, target in [(f"capped_{config['train_rul_cap']:g}", fault_predictions.target), ("official_uncapped", fault_predictions.raw_target)]:
+                                lo, hi = interval_bounds(fault_predictions.prediction, calibration, protocol=protocol)
                                 measured = metrics(fault_predictions.prediction, target)
                                 clean_rmse = metrics(predictions.prediction, predictions.raw_target if protocol == "official_uncapped" else predictions.target)["RMSE"]
                                 robustness.append({"subset": subset, "seed": seed, "family": family, "severity": severity,
                                     "replicate": replicate, "protocol": protocol, **fault_report, **measured,
                                     **exposure_metrics(fault_predictions, target),
                                     "Interval_Coverage": float(((target >= lo) & (target <= hi)).mean()),
+                                    "Interval_Method": calibration["method"],
+                                    "Interval_Policy": calibration["endpoint_policy"],
+                                    "Interval_Unbounded": bool(calibration["protocols"][protocol]["unbounded"]),
                                     "relative_RMSE_increase": measured["RMSE"] / max(clean_rmse, 1e-8) - 1})
                 for variant, options in [("full", {}), ("no_repair", {"use_repair": False}), ("local_only", {"branch": "local"}), ("global_only", {"branch": "global"}), ("equal_fusion", {"equal_fusion": True}), ("no_correction", {"use_correction": False})]:
                     progress.emit(f"evaluating ablation: {variant}")
@@ -106,6 +112,7 @@ def run_experiment(project_root, config, output_dir=None):
                 "thresholds": thresholds, "calibration": calibration, "selected_seed": int(seed), "partitions": groups,
                 "training_config": config, "correction_bound": float(model.correction_bound),
                 "repair_selected": bool(model.repair_enabled),
+                "detector_audit": model.detector_audit,
                 "background_metadata": background_metadata,
                 "pipeline_identity": pipeline_identity(fit, val, subset, config, seed),
                 "oof_audit": oof_audit, "source_hashes": source_hashes(root / "data", subset),
@@ -118,6 +125,8 @@ def run_experiment(project_root, config, output_dir=None):
             if selection < best_selection:
                 best_selection, selected = selection, entry
             calibration_records.assign(subset=subset, seed=seed).to_csv(output / f"calibration_{subset}_{seed}.csv", index=False)
+            model.detector_history.assign(subset=subset, seed=seed).to_csv(output / f"detector_history_{subset}_{seed}.csv", index=False)
+            (output / f"detector_audit_{subset}_{seed}.json").write_text(json.dumps(model.detector_audit, indent=2, allow_nan=False))
             predictions.assign(subset=subset, seed=seed).to_csv(output / f"predictions_{subset}_{seed}.csv", index=False)
             progress.emit("seed complete; saving results", force=True)
             del model
@@ -147,6 +156,8 @@ def run_experiment(project_root, config, output_dir=None):
     torch.save(bundle, temporary); os.replace(temporary, path)
     (output / "run_manifest.json").write_text(json.dumps({"format_version": FORMAT_VERSION, "architecture": ARCHITECTURE,
         "corruption_protocol": CORRUPTION_PROTOCOL,
+        "evaluation_status": "exploratory; official benchmark test subsets were inspected in prior development runs",
+        "selection_data": "fitting and held validation training engines only; independent calibration engines",
         "quick_run": config["quick_run"], "created_at": stamp, "subsets": list(models), "artifact": path.name}, indent=2))
     print(f"Saved {'QUICK EXECUTION CHECK' if config['quick_run'] else 'FULL TRAINING RUN'}: {path}", flush=True)
     if config["run_matched_benchmarks"]:
@@ -163,7 +174,7 @@ def load_bundle(path, device="cpu"):
     if (bundle.get("format_version") not in SUPPORTED_ARCHITECTURES or
             bundle.get("architecture") != SUPPORTED_ARCHITECTURES.get(bundle.get("format_version")) or
             bundle.get("feature_columns") != FEATURE_COLUMNS):
-        raise ValueError(f"Expected a GRACE-RUL format-{FORMAT_VERSION} or supported format-5 artifact. Legacy formats below 5 are incompatible.")
+        raise ValueError(f"Expected a GRACE-RUL format-{FORMAT_VERSION} or supported format-5/6 artifact. Legacy formats below 5 are incompatible.")
     if set(bundle["models"]) != set(bundle["config"]["subsets"]):
         raise ValueError("Bundle subsets do not match its configuration.")
     loaded = {}
@@ -172,12 +183,15 @@ def load_bundle(path, device="cpu"):
         calibration = entry["calibration"]
         if thresholds.shape != (21,) or not np.isfinite(thresholds).all() or np.any((thresholds < 0) | (thresholds > 1)):
             raise ValueError("Invalid sensor fault thresholds.")
-        if not np.isfinite([calibration["lower_offset"], calibration["upper_offset"]]).all() or calibration["lower_offset"] > calibration["upper_offset"]:
-            raise ValueError("Invalid empirical interval calibration.")
+        validate_calibration_contract(calibration)
         model = GraceRUL(entry.get("training_config", bundle["config"])).to(device)
         if transform_spec(entry["scaler"]) != transform_spec(model.config):
             raise ValueError("Saved scaler and model sensor representations disagree.")
         model.load_state_dict(entry["state_dict"], strict=True)
+        if model.config.get("finite_repair_gate") == "validated_threshold":
+            gates = model.finite_repair_thresholds.detach().cpu().numpy()
+            if not np.array_equal(gates, thresholds.astype(np.float32)):
+                raise ValueError("Saved detector thresholds and finite repair gates disagree.")
         if not all(bool(torch.isfinite(p).all()) for p in model.parameters()):
             raise ValueError("Non-finite model weights.")
         if not bool(torch.isfinite(model.correction_bound)) or float(model.correction_bound) <= 0:
@@ -187,3 +201,32 @@ def load_bundle(path, device="cpu"):
             raise ValueError("Selected repair/correction metadata does not match the model.")
         loaded[subset] = {"model": model.eval(), "scaler": OperatingRegimeScaler(entry["scaler"]), "entry": entry}
     return bundle, loaded
+
+
+def validate_calibration_contract(calibration):
+    """Accept legacy finite offsets or auditable target-specific conformal bounds."""
+    if calibration.get("method") != "split_conformal_absolute":
+        offsets = np.asarray([calibration["lower_offset"], calibration["upper_offset"]], float)
+        if not np.isfinite(offsets).all() or offsets[0] > offsets[1]:
+            raise ValueError("Invalid empirical interval calibration.")
+        return
+    from .calibration import conformal_rank
+    protocols = calibration.get("protocols", {})
+    if set(protocols) != {calibration.get("primary_protocol"), "official_uncapped"}:
+        raise ValueError("Missing capped/raw conformal interval contracts.")
+    for contract in protocols.values():
+        n, alpha = contract["n"], contract["alpha"]
+        rank = conformal_rank(n, alpha)
+        if contract["rank"] != rank or contract["engines"] != n:
+            raise ValueError("Invalid conformal calibration engine count or rank.")
+        if contract["unbounded"]:
+            if rank <= n or any(contract.get(key) is not None for key in ["radius", "lower_offset", "upper_offset"]):
+                raise ValueError("Invalid unbounded conformal interval contract.")
+        else:
+            radius = contract["radius"]
+            if rank > n or not np.isfinite(radius) or radius < 0 or contract["lower_offset"] != -radius or contract["upper_offset"] != radius:
+                raise ValueError("Invalid finite conformal radius or offsets.")
+    primary = protocols[calibration["primary_protocol"]]
+    for key in ["radius", "lower_offset", "upper_offset", "unbounded", "rank", "n"]:
+        if calibration.get(key) != primary[key]:
+            raise ValueError("Primary interval aliases disagree with the target contract.")

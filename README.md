@@ -4,7 +4,9 @@ Corrupt sensor data during training, detect damaged readings, recover degradatio
 signals, and predict remaining useful life. The notebook and website share one
 PyTorch implementation in `grace_rul/`.
 
-- [Current format-6 recovery repair and training commands](docs/RECOVERY_V6.md)
+- [Current format-7 repairs and training commands](docs/RECOVERY_V7.md)
+- [Target-specific interval calibration](docs/CALIBRATION_PROTOCOL.md)
+- [Earlier format-6 repair](docs/RECOVERY_V6.md)
 - [Earlier design rationale and paper analysis](docs/FINAL_ARCHITECTURE.md)
 - [Training audit, fixes, and cleanup](docs/TRAINING_AUDIT.md)
 - [Current paper integration audit](docs/INTEGRATION_AUDIT_2026-10-14.md)
@@ -17,20 +19,22 @@ PyTorch implementation in `grace_rul/`.
 
 ## Recovery stability check
 
-Format 6 addresses extreme stuck-sensor z-scores and rejected recovery discarding
-joint predictor/detector learning. Existing trained results remain a format-5
-baseline; improved format-6 accuracy still needs a fresh run. Source-only publishing
-excludes training runs, checkpoints, generated figures and saved result tables.
+Format 7 protects intact readings in original linear sensor space, fits the finite-fault
+detector separately, and freezes it during recovery/joint training. Validation-selected
+thresholds protect intact channels in clean, stuck, mixed, and other fault contexts.
+Recovery can still be rejected by the unchanged safety limits. Clean validation RMSE
+and mean NASA score share one original-predictor tolerance across later stages.
+Capped and raw targets have separate engine-level conformal interval contracts.
+Existing format-5/6 runs remain historical evidence; new performance requires training.
 
 ```bash
 source minor/bin/activate
 python scripts/check_recovery_fix.py --pilot --device cpu
 ```
 
-This limited pilot uses only fitting/validation engines from training files, with
-full tensor dimensions and small budgets. Use CUDA for full training. Detailed
-changes, uncompressed-error guards, compatibility and commands are in
-[RECOVERY_V6.md](docs/RECOVERY_V6.md).
+This pilot uses training-file fitting/validation engines with full tensor dimensions
+and small budgets. See [RECOVERY_V7.md](docs/RECOVERY_V7.md) for exact scope,
+compatibility, and fresh-directory CUDA commands. Generated runs stay out of GitHub.
 
 ## Environment and notebook
 
@@ -64,7 +68,7 @@ also tries stride 5. Official test predictions use the last observed endpoint pe
 The same workflow is available without a notebook:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v6
+.venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v7
 ```
 
 For a small CPU check including tuning and trained comparisons:
@@ -77,7 +81,7 @@ The default command still includes many temporary fold models. To also run the
 separate comparisons and extended evaluation reports, use:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_v6_paper_study
+.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_v7_paper_study
 ```
 
 In the notebook, set `RUN_PAPER_STUDY = True` before training to enable both reports.
@@ -123,7 +127,7 @@ loaded; correction features, the small residual corrector, and evaluations are
 recomputed. A changed training configuration, architecture, or engine data requires
 a new run directory. Report switches can change without invalidating completed
 upstream epochs; rerun with the same output directory to reuse them.
-Format-6 training requires a fresh directory. Format-5 bundles remain readable
+Format-7 training requires a fresh directory. Format-5/6 bundles remain readable
 for inference; format-3/4 bundles remain incompatible. The interrupted October
 8 run and its notebook outputs were removed during the October 11 audit.
 
@@ -150,9 +154,9 @@ The observation rows in C-MAPSS represent consecutive cycles.
 
 This changes training data. Start a fresh run directory for checkpoints created
 before this correction; the new training identity rejects the earlier protocol.
-Format 6 adds invertible asinh inputs, robust recovery objectives, class-balanced
-finite-fault supervision, and independent bypass validation. Earlier format-5 bundles
-remain loadable with their original preprocessing and training semantics.
+Format 7 retains asinh inputs and structured faults, with separately validated frozen
+detection, thresholded recovery, original-linear intact supervision, and target-specific
+calibration. Earlier format-5/6 bundles remain loadable with their original inference behavior.
 New bundles and run manifests record the corruption protocol explicitly.
 
 ## What the notebook implements
@@ -167,13 +171,15 @@ New bundles and run manifests record the corruption protocol explicitly.
 2. Introduce intermittent loss, outage, blocks, noise, bias, drift, and mixed faults
    on trajectories before building windows, retaining unmodified examples.
 3. Train the detector, selective residual BiLSTM recovery, conditional WGAN-GP critic,
-   and quality-gated CNN–GRU / Transformer predictor in stages, then jointly. Direct
+   and quality-gated CNN–GRU / Transformer predictor in stages. The detector is frozen
+   during joint recovery/predictor optimization. Direct
    reconstruction and temporal-trend losses preserve degradation information;
    class-balanced detector supervision and identity loss protect intact readings.
 4. Fit a bounded residual corrector using observable quality summaries and RUL
    predictions from engine-disjoint folds, retaining a zero-correction candidate;
-   select correction bounds and sensor thresholds using validation data and calibrate empirical intervals
-   using separate engines.
+   select correction bounds and sensor thresholds using validation data; calibrate separate
+   capped/raw intervals on every prefix of independent reserved engines, using one
+   maximum residual per engine and a finite-sample conformal rank.
 5. Record held-out upstream cross-validation metrics and their mean/std summaries,
    official clean/corrupted test results, capped and original target conventions,
    all seeds, and explicitly labeled inference-intervention ablations. Upstream CV
@@ -187,8 +193,12 @@ New bundles and run manifests record the corruption protocol explicitly.
 
 SHAP and LIME explain model behavior. The detector and directly observed missingness
 provide fault evidence. Importance alone does not establish a sensor fault.
-Empirical intervals have no distribution-free coverage guarantee, particularly
-under new corruption or operating conditions.
+Engine-prefix conformal intervals require exchangeable complete engine trajectories.
+They do not guarantee coverage under new corruption, fleet shift, or different censoring.
+Small calibration samples can yield unbounded intervals. The capped point estimate is
+a limited-horizon RUL prediction, not a physical failure-cycle forecast.
+Official benchmark test sets were inspected in prior development runs; later comparisons
+are exploratory. Model selection continues to use training-file validation engines only.
 
 ## Website and model placeholder
 
@@ -201,7 +211,7 @@ cd ..
 ```
 
 Open <http://127.0.0.1:8000>. A visible placeholder accepts upload previews while
-training is pending. Supported full format-5/6 bundles are discovered automatically after
+training is pending. Supported full format-5/6/7 bundles are discovered automatically after
 training; status identifies the loaded format. The model page displays only results recorded by the connected run.
 Sensor reports show affected cycles, scores and thresholds, recovered readings,
 and on-demand SHAP/LIME explanations. Quick artifacts are excluded from automatic

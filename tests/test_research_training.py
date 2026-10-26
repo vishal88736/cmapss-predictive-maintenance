@@ -170,8 +170,9 @@ class ResearchTraining(unittest.TestCase):
         self.assertFalse(bool(model.repair_enabled))
         self.assertEqual(history.checkpoint_accepted.tolist(), [True, False, False])
         for name, weights in snapshot.items():
-            if name != "repair_enabled":
+            if name.startswith(("predictor.", "generator.", "corrector.")):
                 torch.testing.assert_close(model.state_dict()[name], weights, rtol=0, atol=0)
+        self.assertIsNotNone(model.detector_audit)
 
     def test_scheduler_reduction_survives_interruption(self):
         config = {**self.config, "train_repair": False, "train_corrupted_predictor": False, "predictor_epochs": 4,

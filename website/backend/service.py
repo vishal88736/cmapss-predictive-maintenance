@@ -43,6 +43,29 @@ def spans(cycles, flagged):
     return result
 
 
+def calibration_contract(calibration, protocol):
+    """Describe the selected target's interval, including legacy capped bundles."""
+    if "protocols" in calibration:
+        return calibration["protocols"].get(protocol)
+    if protocol == "official_uncapped":
+        return None
+    return {**calibration, "method": calibration.get("method", "empirical_residual_quantiles"),
+            "target_convention": protocol}
+
+
+def interval_record(lower, upper, contract):
+    if contract is None:
+        return {"available": False, "interval_lower": None, "interval_upper": None,
+                "interval_width": None, "interval_unbounded": False,
+                "scope": "No calibration for this target convention in the connected bundle."}
+    unbounded = bool(np.isposinf(upper))
+    return {"available": True, "interval_lower": float(lower), "interval_upper": None if unbounded else float(upper),
+            "interval_width": None if unbounded else float(upper - lower), "interval_unbounded": unbounded,
+            "method": contract.get("method", "empirical_residual_quantiles"),
+            "target_convention": contract.get("target_convention"), "scope": contract.get("scope"),
+            "nominal_confidence": 100 * (1 - contract.get("alpha", .1))}
+
+
 class InferenceService:
     def __init__(self):
         self.lock = threading.RLock()
@@ -95,6 +118,9 @@ class InferenceService:
             quick = ready and self.config.get("quick_run", False)
             parameters = {name: sum(p.numel() for entry in self.loaded.values() for p in getattr(entry["model"], name).parameters())
                           for name in ["detector", "generator", "predictor", "corrector"]} if ready else None
+            calibrations = {subset: calibration_contract(item["entry"]["calibration"], f"capped_{item['model'].config['train_rul_cap']:g}")
+                            for subset, item in self.loaded.items()}
+            methods = sorted({contract["method"] for contract in calibrations.values() if contract})
             return {"ready": ready, "state": "error" if self.load_error else "ready" if ready else "awaiting_model",
                 "message": self.load_error or ("Quick validation model connected; results are execution checks." if quick else "Trained model connected." if ready else "Your model slot is ready. Complete full notebook training to connect the model."),
                 "model_name": "GRACE-RUL", "format_version": self.bundle["format_version"] if ready else FORMAT_VERSION, "bundle_name": self.path.parent.name if self.path else None,
@@ -103,7 +129,13 @@ class InferenceService:
                 "selected_correction_bounds": {s: float(e["model"].correction_bound) for s, e in self.loaded.items()},
                 "selected_repair": {s: bool(e["model"].repair_enabled) for s, e in self.loaded.items()},
                 "selected_adversarial_weights": {s: e["model"].config["adversarial_loss_weight"] for s, e in self.loaded.items()},
-                "interval_confidence": 100 * (1 - self.config["interval_alpha"]), "interval_method": "empirical calibration residual quantiles",
+                "interval_confidence": 100 * (1 - self.config["interval_alpha"]),
+                "interval_method": methods[0] if len(methods) == 1 else "per_subset" if methods else "awaiting_calibration",
+                "interval_calibration_by_subset": {subset: {key: contract.get(key) for key in ["method", "scope", "target_convention", "alpha", "unbounded"]}
+                                                   for subset, contract in calibrations.items() if contract},
+                "interval_primary_protocols": {subset: item["entry"]["calibration"].get("primary_protocol", f"capped_{item['model'].config['train_rul_cap']:g}")
+                                               for subset, item in self.loaded.items()},
+                "training_horizons": {subset: item["model"].config["train_rul_cap"] for subset, item in self.loaded.items()},
                 "explanations_available": bool(importlib.util.find_spec("shap") and importlib.util.find_spec("lime")),
                 "placeholder": {"notebook": "GRACE_RUL_all_subsets.ipynb", "artifact": "artifacts/<run>/grace_rul_ALL.pt", "manifest": "models/model_manifest.json"}}
 
@@ -148,7 +180,13 @@ class InferenceService:
                 prediction = out["prediction"].cpu().numpy()
                 if not np.isfinite(prediction).all():
                     raise ModelUnavailable("The model produced a non-finite prediction. Check the input and artifact.")
-                lo, hi = interval_bounds(prediction, entry["calibration"])
+                cap = float(model.config["train_rul_cap"])
+                protocol = f"capped_{cap:g}"
+                calibration = entry["calibration"]
+                contract = calibration_contract(calibration, protocol)
+                lo, hi = interval_bounds(prediction, calibration, protocol=protocol)
+                raw_contract = calibration_contract(calibration, "official_uncapped")
+                raw_lo, raw_hi = interval_bounds(prediction, calibration, protocol="official_uncapped") if raw_contract else (None, None)
                 final_valid = valid[-1]
                 repaired = out["repaired"][-1, final_valid].cpu().numpy()
                 observed = group.tail(len(repaired))
@@ -157,6 +195,8 @@ class InferenceService:
                 thresholds = np.asarray(entry["thresholds"])
                 detection_available = has_finite_fault_detector(model)
                 flags = (scores >= thresholds[None]) & finite & detection_available
+                if model.config.get("finite_repair_gate") == "validated_threshold":
+                    flags &= thresholds[None] < 1
                 cycles = observed.cycle.to_numpy()
                 physical = scaler.inverse_sensors(repaired, regimes[-len(repaired):])
                 original = observed[SENSORS].to_numpy(float)
@@ -171,6 +211,11 @@ class InferenceService:
                         "repair_magnitude": float(delta.mean()), "fault_spans": spans(cycles, flags[:, j]), "missing_spans": spans(cycles, ~finite[:, j])})
                 target = group.iloc[-1].get("true_rul", np.nan)
                 truth = float(target) if pd.notna(target) else None
+                capped_truth = min(cap, truth) if truth is not None else None
+                primary_interval = interval_record(lo[-1], hi[-1], contract)
+                raw_interval = interval_record(raw_lo[-1], raw_hi[-1], raw_contract) if raw_contract else interval_record(None, None, None)
+                cycle_proxy = int(group.iloc[-1].cycle) + float(prediction[-1])
+                proxy_scope = "Last observed cycle plus capped-target RUL prediction; a horizon-limited proxy, not a physical failure-cycle forecast."
                 mc_std = None
                 if mc_dropout:
                     for module in model.predictor.modules():
@@ -184,21 +229,37 @@ class InferenceService:
                 engines.append({"id": f"{subset}:{unit}", "subset": subset, "unit": int(unit), "last_cycle": int(group.iloc[-1].cycle), "observations": len(group),
                     "recovery_enabled": bool(model.repair_enabled),
                     "finite_fault_detection_available": detection_available,
+                    "target_convention": protocol, "train_rul_cap": cap,
                     "predicted_rul": float(prediction[-1]), "base_rul": float(out["base"][-1]), "correction_cycles": float(out["delta"][-1]),
-                    "interval_lower": float(lo[-1]), "interval_upper": float(hi[-1]), "interval_width": float(hi[-1] - lo[-1]),
-                    "interval_scope": entry["calibration"]["scope"], "mc_std_cycles": mc_std,
-                    "estimated_failure_cycle": int(group.iloc[-1].cycle) + float(prediction[-1]), "true_rul": truth, "error": float(prediction[-1]) - truth if truth is not None else None,
+                    "interval_lower": primary_interval["interval_lower"], "interval_upper": primary_interval["interval_upper"],
+                    "interval_width": primary_interval["interval_width"], "interval_unbounded": primary_interval["interval_unbounded"],
+                    "interval_scope": primary_interval["scope"], "interval_method": primary_interval["method"],
+                    "interval_primary_protocol": calibration.get("primary_protocol", protocol),
+                    "intervals": {"capped": primary_interval, "official_uncapped": raw_interval}, "mc_std_cycles": mc_std,
+                    "failure_cycle_proxy": cycle_proxy, "failure_cycle_proxy_scope": proxy_scope,
+                    "estimated_failure_cycle": cycle_proxy, "estimated_failure_cycle_scope": proxy_scope,
+                    "true_rul": truth, "true_rul_capped": capped_truth,
+                    "error": float(prediction[-1]) - truth if truth is not None else None, "error_protocol": "official_uncapped",
+                    "error_capped": float(prediction[-1]) - capped_truth if capped_truth is not None else None,
                     "availability": 100 * float(finite.mean()), "missing_readings": int((~finite).sum()), "padded_cycles": max(0, length - len(group)),
                     "operating_regime": int(regimes[-1]), "local_gate": float(out["gates"][-1, 0]), "global_gate": float(out["gates"][-1, 1]),
                     "suspected_sensors": sum(s["suspected_cycles"] > 0 for s in sensor_reports), "sensors": sensor_reports,
-                    "trajectory": [{"cycle": int(group.iloc[int(end)].cycle), "predicted_rul": float(p), "interval_lower": float(l), "interval_upper": float(h)} for end, p, l, h in zip(ends, prediction, lo, hi)],
+                    "trajectory": [{"cycle": int(group.iloc[int(end)].cycle), "predicted_rul": float(p), "interval_lower": float(l),
+                                    "interval_upper": float(h), "interval_unbounded": bool(np.isposinf(h)), "target_convention": protocol} for end, p, l, h in zip(ends, prediction, lo, hi)],
                     "sensor_history": [{"cycle": int(cycle), "observed": original[j].tolist(), "repaired": physical[j].tolist()} for j, cycle in enumerate(cycles)]})
             predictions = np.asarray([e["predicted_rul"] for e in engines])
-            return clean_json({"filename": filename, "demo": False, "model": {"name": "GRACE-RUL", "bundle": self.path.parent.name, "mode": "quick" if self.config["quick_run"] else "trained", "device": str(self.device)},
+            unbounded_intervals = sum(e["interval_unbounded"] for e in engines)
+            mean_interval_width = None if unbounded_intervals else float(np.mean([e["interval_width"] for e in engines]))
+            return clean_json({"filename": filename, "demo": False, "model": {"name": "GRACE-RUL", "bundle": self.path.parent.name, "mode": "quick" if self.config["quick_run"] else "trained", "device": str(self.device),
+                "target_convention": "capped_per_model", "training_horizons": {subset: item["model"].config["train_rul_cap"] for subset, item in self.loaded.items()}},
                 "input": preview(frame, filename), "engines": engines, "summary": {"engines": len(engines), "rows": len(frame), "mean_rul": float(predictions.mean()), "min_rul": float(predictions.min()), "max_rul": float(predictions.max()),
-                    "availability": preview(frame, filename)["availability"], "mean_interval_width": float(np.mean([e["interval_width"] for e in engines])), "near_failure": int((predictions <= 25).sum()),
+                    "availability": preview(frame, filename)["availability"], "mean_interval_width": mean_interval_width,
+                    "unbounded_intervals": unbounded_intervals, "near_failure": int((predictions <= 25).sum()),
                     "suspected_sensors": sum(e["suspected_sensors"] for e in engines), "interval_confidence": 100 * (1 - self.config["interval_alpha"]), "elapsed_seconds": time.perf_counter() - started},
-                "metrics": regression_metrics(engines), "metrics_by_subset": {s: regression_metrics([e for e in engines if e["subset"] == s]) for s in frame["subset"].unique()}})
+                "metrics": regression_metrics(engines), "metrics_by_subset": {s: regression_metrics([e for e in engines if e["subset"] == s]) for s in frame["subset"].unique()},
+                "metrics_by_protocol": {protocol: regression_metrics(engines, protocol) for protocol in ["capped", "official_uncapped"]},
+                "metrics_by_subset_protocol": {s: {protocol: regression_metrics([e for e in engines if e["subset"] == s], protocol)
+                    for protocol in ["capped", "official_uncapped"]} for s in frame["subset"].unique()}})
 
     def explain(self, frame, subset, unit, sensor=None):
         from .inference import clean_json
@@ -233,5 +294,7 @@ class InferenceService:
             result = explain_window(item["model"], x, valid, item["entry"]["background"], item["entry"]["background_valid"],
                                     target_sensor=target, samples=self.config["explanation_samples"], seed=self.config["seed"])
             return clean_json({**result, "engine": f"{subset}:{unit}", "model_bundle": self.path.parent.name,
+                               "target_convention": f"capped_{item['model'].config['train_rul_cap']:g}",
+                               "train_rul_cap": item["model"].config["train_rul_cap"],
                                "note": "SHAP and LIME explain estimated fault scores and RUL. Sensor importance alone does not confirm a fault." if detection_available else
                                        "SHAP and LIME explain final RUL only; finite-fault detection is unavailable for this model."})

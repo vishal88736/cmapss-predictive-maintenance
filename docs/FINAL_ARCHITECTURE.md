@@ -1,9 +1,9 @@
 # Finalized research architecture: GRACE-RUL
 
 **26 October 2026 reading note:** this file preserves the earlier design and
-three-paper analysis, including proposed experiments. The current format-6
-preprocessing, loss and checkpoint repairs are documented in [RECOVERY_V6.md](RECOVERY_V6.md).
-The completed format-5 run remains a frozen local baseline. Earlier proposed
+three-paper analysis, including proposed experiments. Current format-7 detector,
+recovery, checkpoint and interval contracts are in [RECOVERY_V7.md](RECOVERY_V7.md).
+Completed format-5/6 runs remain frozen local evidence. Earlier proposed
 limits and statements about unexecuted training below are historical, not the
 current runtime specification. Generated result archives are excluded from source publishing.
 

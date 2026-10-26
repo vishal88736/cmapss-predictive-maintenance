@@ -30,7 +30,8 @@ def add_cell(kind, source, tags=None):
 md("""
 # GRACE-RUL: corruption, recovery, prediction, and sensor fault explanations
 
-This notebook implements the finalized architecture in `docs/FINAL_ARCHITECTURE.md`:
+This notebook implements the current architecture in `docs/RECOVERY_V7.md`;
+`docs/FINAL_ARCHITECTURE.md` preserves the original paper integration:
 **fault detector → selective BiLSTM recovery with WGAN-GP → gated CNN–GRU / Transformer → bounded residual correction → SHAP + LIME**.
 
 It uses the `grace_rul/` package so the website loads exactly the same model definitions.
@@ -45,10 +46,11 @@ Set it to `True` only for a small FD001 execution check. Quick artifacts are cle
 labeled and are not benchmark evidence. A full run has a substantial compute cost.
 Neither this notebook nor its artifact claims superiority before matched experiments.
 
-Format 6 adds invertible asinh sensor compression, robust recovery losses,
-channel/class-balanced finite-fault training, and independently validated joint
-training with recovery bypassed. A new training directory is required. Existing
-format-5 weights remain loadable for inference and baseline comparisons.
+Format 7 uses invertible asinh sensor inputs, original-linear intact identity loss,
+a separately fitted frozen detector, validation-thresholded repair gates, shared
+clean RMSE/NASA guards, and target-specific engine-prefix conformal intervals.
+A new training directory is required. Format-5/6 weights remain loadable for
+inference and historical comparisons; new performance requires fresh training.
 """)
 code("""
 from pathlib import Path
@@ -85,18 +87,27 @@ The residual generator starts by preserving observed values. Direct reconstructi
 temporal-trend supervision, and intact-entry identity losses train recovery. Full mode
 uses stride-1 windows and balances sampling by engine. Learning-rate reduction and
 clean/intact/reconstruction checkpoint limits are configurable. Joint training includes
-clean-reference RUL supervision and permits at most 1% clean RMSE regression by default.
+clean-reference RUL supervision and permits at most 1% clean RMSE and mean NASA-score
+regression against the original clean predictor by default. Detector fitting is separate;
+its weights stay frozen during recovery/joint training. Finite repairs require per-sensor
+thresholds selected under a 5% empirical intact-cell false-positive limit in every
+validation fault context. Recovery/RUL gradients cannot change detector gates.
 It also supervises prediction with recovery bypassed. Joint validation can retain
 that path independently when recovery fails. Recovery must not increase original
 linear sensor error; intact-reading protection is checked before asinh compression.
 The curriculum reaches full fault severity within ten epochs, before default patience expires.
 Corruption labels supervise detection/recovery only; they are never inference features.
 The critic is training-only. Training targets are capped at 125; evaluation reports capped
-and original official targets separately. Empirical intervals are not conformal guarantees.
+and original official targets separately. Intact identity loss uses original linear
+sensor error normalized by its protection budget, even with asinh model inputs.
 
 Partition and validation/evaluation corruption seeds are fixed across training seeds. Validation samples
-three prefixes per engine; correction uses six; calibration retains one independent
-endpoint per engine. Full runs train separate models for each subset. Seeds are selected using validation
+three prefixes per engine; correction uses six. Interval calibration evaluates every
+clean prefix of each reserved engine, uses one maximum absolute error per engine,
+and takes the finite-sample conformal order statistic. Capped and raw targets have
+separate contracts. Small calibration samples may produce honest unbounded intervals.
+Coverage requires exchangeable whole trajectories and is not guaranteed under
+fleet/censoring shift, corrupted data, or OOD conditions. Full runs train separate models for each subset. Seeds are selected using validation
 performance, never test scores. Training explicitly requests `CONFIG['device'] = 'cuda'`.
 Protocol `structured-sensor-faults-v4` selects a related measurement domain, protects
 operating settings and demanded speeds, and uses raw-unit amplitude scales estimated
@@ -225,9 +236,9 @@ md("""
 ## Train and export the complete pipeline
 
 `run_experiment` first searches loss weights and stride on fitting/validation engines
-without opening official test files. It then performs predictor pretraining, detector/generator and WGAN-GP training,
+without opening official test files. It then performs predictor pretraining, independent finite-fault detector fitting, generator/WGAN-GP training,
 joint recovery/RUL optimization, three-fold engine-disjoint correction fitting, validation
-fault-threshold selection, and separate empirical interval calibration. Temporary OOF
+fault-threshold selection, and engine-disjoint, target-specific conformal calibration. Temporary OOF
 models also use independent inner validation engines. The exported audit records these
 partitions. No training or calibration stage fits on the official test engines.
 
@@ -246,9 +257,10 @@ epochs (including OOF models) are saved in the printed run directory's `checkpoi
 To resume after interrupting, restart the kernel and rerun setup/configuration with
 the same settings, then pass that run directory as `output_dir` to `run_experiment`.
 Completed upstream models load from checkpoints; correction and evaluation rerun.
-Format 6 changes preprocessing, losses, and checkpoint selection while preserving
-the physical `structured-sensor-faults-v4` mechanisms. All format-5 training
-checkpoints require a fresh directory. Format-5 bundles remain inference-compatible;
+Format 7 changes detector fitting, recovery gating, identity loss, checkpoint guards,
+and interval contracts while preserving physical `structured-sensor-faults-v4`
+mechanisms. All format-5/6 training checkpoints require a fresh directory.
+Format-5/6 bundles remain inference-compatible;
 older format-3/4 bundles are incompatible.
 
 Three-fold metrics evaluate the detector/recovery/predictor on held-out fitting engines
@@ -286,8 +298,10 @@ md("""
 
 The following figures and tables use this run's CSV records. Capped and uncapped
 test targets remain separate. Quick results are execution checks. The calibration
-interval scope is clean, capped-target endpoints; fault/shift coverage is measured
-and must not be assumed.
+contracts distinguish capped and raw targets. Simultaneous clean-prefix coverage
+requires exchangeable engine trajectories; fault/shift coverage must not be assumed.
+Official test subsets were inspected in earlier development runs, so subsequent
+benchmark results are exploratory rather than a fresh untouched holdout.
 """)
 code("""
 history = TABLES['training_history']
@@ -309,10 +323,12 @@ for name in ['robustness_summary', 'ablation_metrics', 'validation_search', 'tes
 md("""
 ## Reload the exact website artifact and inspect recovery
 
-The format-6 bundle contains weights, selected per-subset settings, repair/bound buffers, correction, sensor thresholds,
-empirical interval offsets, fitting-only explanation backgrounds, source hashes, and
-engine split audits. It can be loaded with `weights_only=True`. Format-5 bundles
-retain their original linear preprocessing; incompatible older artifacts are rejected.
+The format-7 bundle contains weights, selected per-subset settings, repair/bound buffers, correction, sensor thresholds,
+validated repair gates, detector fitting audits, separate capped/raw interval contracts,
+fitting-only explanation backgrounds, source hashes, and
+engine split audits. It can be loaded with `weights_only=True`. Format-5/6 bundles
+retain their original preprocessing and inference behavior; new training requires a
+fresh run directory. Incompatible older artifacts are rejected.
 """)
 code("""
 bundle, loaded = load_bundle(BUNDLE_PATH, device='cpu')

@@ -1,9 +1,10 @@
 """Serializable configuration shared by the notebook and website."""
 
-FORMAT_VERSION = 6
-ARCHITECTURE = "asinh-balanced-recovery-gated-cnn-gru-transformer-residual-v6"
+FORMAT_VERSION = 7
+ARCHITECTURE = "validated-detector-linear-identity-gated-cnn-gru-transformer-residual-v7"
 SUPPORTED_ARCHITECTURES = {
     5: "detector-residual-bilstm-wgan-gated-cnn-gru-transformer-residual-v5",
+    6: "asinh-balanced-recovery-gated-cnn-gru-transformer-residual-v6",
     FORMAT_VERSION: ARCHITECTURE,
 }
 CORRUPTION_PROTOCOL = "structured-sensor-faults-v4"
@@ -21,11 +22,17 @@ DEFAULT_CONFIG = {
     "sensor_transform": "asinh", "sensor_transform_scale": 1.0,
     "repair_loss": "smooth_l1", "repair_huber_beta": 1.0,
     "detector_loss": "balanced", "validate_bypass": True,
+    "identity_loss_space": "original_linear", "detach_repair_gate": True,
+    "finite_repair_gate": "validated_threshold", "detector_training": "separate",
+    "detector_refinement_epochs": 15, "detector_refinement_learning_rate": 0.001,
+    "detector_refinement_patience": 5, "detector_max_false_positive_rate": 0.05,
+    "detector_refinement_min_improvement": 0.0001,
     "generator_layers": 2, "cnn_channels": 32, "gru_hidden": 64,
     "transformer_dim": 64, "transformer_heads": 4, "transformer_layers": 2,
     "dropout": 0.2, "correction_bound": 15.0, "correction_penalty": 0.02,
     "correction_bounds": [5.0, 10.0, 15.0, 30.0],
-    "interval_alpha": 0.1, "mc_passes": 20, "batch_size": 128,
+    "interval_alpha": 0.1, "calibration_policy": "engine_prefix_max",
+    "mc_passes": 20, "batch_size": 128,
     "predictor_epochs": 100, "generator_epochs": 50, "joint_epochs": 20,
     "correction_epochs": 50, "patience": 15, "learning_rate": 0.001,
     "repair_learning_rate": 0.0001, "joint_learning_rate": 0.0001,
@@ -46,6 +53,7 @@ DEFAULT_CONFIG = {
     "bypass_rul_loss_weight": 0.5,
     "lr_factor": 0.5, "lr_patience": 5, "minimum_learning_rate": 0.000001,
     "max_clean_rmse_increase": 0.01, "max_intact_repair_rmse": 0.15,
+    "max_clean_nasa_increase": 0.01,
     "max_reconstruction_rmse": 1.5,
     "max_linear_reconstruction_ratio": 1.0,
     "predictor_family": "gated", "predictor_branch": "both", "equal_fusion": False,
@@ -71,6 +79,7 @@ def quick_config(config):
     return {**config, "quick_run": True, "subsets": ["FD001"], "seeds": [42],
             "predictor_epochs": 1, "generator_epochs": 1, "joint_epochs": 1,
             "correction_epochs": 2, "maximum_batches": 2, "maximum_engines": 18,
+            "detector_refinement_epochs": 1, "detector_refinement_patience": 1,
             "maximum_windows": 48, "batch_size": 8, "generator_hidden": 16,
             "cnn_channels": 8, "gru_hidden": 16, "transformer_dim": 32,
             "adversarial_warmup": 0, "background_size": 3, "mc_passes": 4,

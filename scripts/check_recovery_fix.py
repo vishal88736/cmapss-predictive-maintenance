@@ -1,4 +1,4 @@
-"""Audit v6 input stability and optionally run a small validation-only neural pilot.
+"""Audit recovery input stability and run an optional validation-only neural pilot.
 
 This script never opens official test trajectories or RUL files. Pilot results
 are execution/learning diagnostics, not the full-run benchmark.
@@ -71,6 +71,7 @@ def neural_pilot(frame, groups, subset, output, device):
     config = {**DEFAULT_CONFIG,'device':device,'quick_run':True,'subsets':[subset],'seeds':[42],
               'tune_before_training':False,'run_matched_benchmarks':False,'run_extended_evaluation':False,
               'predictor_epochs':3,'generator_epochs':3,'joint_epochs':3,'patience':4,
+              'detector_refinement_epochs':3,'detector_refinement_patience':3,
               'maximum_windows':256,'maximum_batches':8,'window_stride':5,'batch_size':16,
               'adversarial_warmup':1,'progress_interval_seconds':15.}
     fit = frame[frame.unit.isin(groups['fit'][:25])].copy()
@@ -78,6 +79,8 @@ def neural_pilot(frame, groups, subset, output, device):
     model, scaler, history, score = fit_pipeline(fit,val,subset,config,42,
                                                 checkpoint_path=output/f'pilot_{subset}.pt')
     history.to_csv(output/f'pilot_{subset}_history.csv',index=False)
+    model.detector_history.to_csv(output/f'pilot_{subset}_detector_history.csv',index=False)
+    (output/f'pilot_{subset}_detector_audit.json').write_text(json.dumps(model.detector_audit,indent=2,allow_nan=False))
     assert np.isfinite(history.train_loss).all()
     reports = {}
     for family in ['clean','mixed','stuck']:
@@ -90,6 +93,8 @@ def neural_pilot(frame, groups, subset, output, device):
             'validation_units':sorted(int(u) for u in val.unit.unique()),
             'selected_repair':bool(model.repair_enabled),'selected_validation_score':score,
             'detector_output_weight_norm':float(model.detector.head.weight.detach().norm()),
+            'detector_audit':model.detector_audit,
+            'finite_repair_thresholds':model.finite_repair_thresholds.cpu().tolist(),
             'reports':reports}
 
 
