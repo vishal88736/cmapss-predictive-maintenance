@@ -1,5 +1,8 @@
 # GRACE-RUL format 7: repair guide and retraining protocol
 
+Current healthy-sensor protections and the frozen-weight upgrade are documented in
+[RECOVERY_V8.md](RECOVERY_V8.md). This guide preserves the format-7 implementation.
+
 Format 7 repairs confirmed training and reporting inconsistencies found in the
 FD002/FD004 format-6 review. It does not establish improved final test accuracy,
 successful sensor recovery, or real-fleet coverage. A fresh full CUDA run remains

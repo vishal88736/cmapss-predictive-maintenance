@@ -124,6 +124,8 @@ class InferenceService:
             return {"ready": ready, "state": "error" if self.load_error else "ready" if ready else "awaiting_model",
                 "message": self.load_error or ("Quick validation model connected; results are execution checks." if quick else "Trained model connected." if ready else "Your model slot is ready. Complete full notebook training to connect the model."),
                 "model_name": "GRACE-RUL", "format_version": self.bundle["format_version"] if ready else FORMAT_VERSION, "bundle_name": self.path.parent.name if self.path else None,
+                "run_type": self.bundle.get("run_type", "training") if ready else None,
+                "weights_retrained": self.bundle.get("weights_retrained") if ready else None,
                 "mode": "quick" if quick else "trained" if ready else "pending", "device": str(self.device),
                 "config": self.config, "supported_subsets": list(self.loaded) if ready else self.config["subsets"], "parameters": parameters,
                 "selected_correction_bounds": {s: float(e["model"].correction_bound) for s, e in self.loaded.items()},

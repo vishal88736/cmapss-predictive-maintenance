@@ -113,6 +113,8 @@ def run_experiment(project_root, config, output_dir=None):
                 "training_config": config, "correction_bound": float(model.correction_bound),
                 "repair_selected": bool(model.repair_enabled),
                 "detector_audit": model.detector_audit,
+                "recovery_support": getattr(model, "recovery_support", None),
+                "recovery_validation_audit": model.recovery_validation_audit,
                 "background_metadata": background_metadata,
                 "pipeline_identity": pipeline_identity(fit, val, subset, config, seed),
                 "oof_audit": oof_audit, "source_hashes": source_hashes(root / "data", subset),
@@ -127,6 +129,9 @@ def run_experiment(project_root, config, output_dir=None):
             calibration_records.assign(subset=subset, seed=seed).to_csv(output / f"calibration_{subset}_{seed}.csv", index=False)
             model.detector_history.assign(subset=subset, seed=seed).to_csv(output / f"detector_history_{subset}_{seed}.csv", index=False)
             (output / f"detector_audit_{subset}_{seed}.json").write_text(json.dumps(model.detector_audit, indent=2, allow_nan=False))
+            (output / f"recovery_validation_{subset}_{seed}.json").write_text(json.dumps({
+                "selected": model.recovery_validation_audit,
+                "candidates": model.recovery_validation_history}, indent=2, allow_nan=False))
             predictions.assign(subset=subset, seed=seed).to_csv(output / f"predictions_{subset}_{seed}.csv", index=False)
             progress.emit("seed complete; saving results", force=True)
             del model
@@ -174,7 +179,7 @@ def load_bundle(path, device="cpu"):
     if (bundle.get("format_version") not in SUPPORTED_ARCHITECTURES or
             bundle.get("architecture") != SUPPORTED_ARCHITECTURES.get(bundle.get("format_version")) or
             bundle.get("feature_columns") != FEATURE_COLUMNS):
-        raise ValueError(f"Expected a GRACE-RUL format-{FORMAT_VERSION} or supported format-5/6 artifact. Legacy formats below 5 are incompatible.")
+        raise ValueError(f"Expected a GRACE-RUL format-{FORMAT_VERSION} or supported format-5/6/7 artifact. Legacy formats below 5 are incompatible.")
     if set(bundle["models"]) != set(bundle["config"]["subsets"]):
         raise ValueError("Bundle subsets do not match its configuration.")
     loaded = {}
@@ -188,6 +193,21 @@ def load_bundle(path, device="cpu"):
         if transform_spec(entry["scaler"]) != transform_spec(model.config):
             raise ValueError("Saved scaler and model sensor representations disagree.")
         model.load_state_dict(entry["state_dict"], strict=True)
+        if model.config.get("recovery_safety") == "fitted_support":
+            profile = entry.get("recovery_support")
+            if not isinstance(profile, dict) or set(profile.get("fit_units", [])) != set(entry["scaler"]["fit_units"]):
+                raise ValueError("Missing or inconsistent fitting-only recovery support.")
+            saved_support = {key: tensor.clone() for key, tensor in model.named_buffers() if key.startswith("recovery_")}
+            model.set_recovery_envelope(profile)
+            if any(not torch.equal(dict(model.named_buffers())[key], value) for key, value in saved_support.items()):
+                raise ValueError("Recovery support metadata disagrees with model buffers.")
+            count = int(model.recovery_regime_count)
+            if not np.array_equal(np.asarray(entry["scaler"]["centers"], np.float32), model.recovery_centers[:count].cpu().numpy()):
+                raise ValueError("Recovery support uses different operating regimes from the scaler.")
+            if bool(model.repair_enabled) and model.config.get("recovery_validation", False):
+                from .recovery_validation import validate_recovery_audit
+                validate_recovery_audit(entry.get("recovery_validation_audit"), model.config,
+                    entry["partitions"], model=model)
         if model.config.get("finite_repair_gate") == "validated_threshold":
             gates = model.finite_repair_thresholds.detach().cpu().numpy()
             if not np.array_equal(gates, thresholds.astype(np.float32)):

@@ -1,10 +1,11 @@
 """Serializable configuration shared by the notebook and website."""
 
-FORMAT_VERSION = 7
-ARCHITECTURE = "validated-detector-linear-identity-gated-cnn-gru-transformer-residual-v7"
+FORMAT_VERSION = 8
+ARCHITECTURE = "fitted-support-tail-identity-guarded-recovery-gated-rul-v8"
 SUPPORTED_ARCHITECTURES = {
     5: "detector-residual-bilstm-wgan-gated-cnn-gru-transformer-residual-v5",
     6: "asinh-balanced-recovery-gated-cnn-gru-transformer-residual-v6",
+    7: "validated-detector-linear-identity-gated-cnn-gru-transformer-residual-v7",
     FORMAT_VERSION: ARCHITECTURE,
 }
 CORRUPTION_PROTOCOL = "structured-sensor-faults-v4"
@@ -23,6 +24,13 @@ DEFAULT_CONFIG = {
     "repair_loss": "smooth_l1", "repair_huber_beta": 1.0,
     "detector_loss": "balanced", "validate_bypass": True,
     "identity_loss_space": "original_linear", "detach_repair_gate": True,
+    "recovery_safety": "fitted_support", "identity_tail_fraction": 0.1,
+    "identity_tail_loss_weight": 0.5,
+    "recovery_validation": True,
+    "recovery_validation_severities": [0.1, 0.2, 0.3, 0.4, 0.5],
+    "recovery_validation_max_channel_intact_rmse": None,
+    "recovery_validation_max_window_intact_rmse": None,
+    "recovery_validation_max_reconstruction_rmse": None,
     "finite_repair_gate": "validated_threshold", "detector_training": "separate",
     "detector_refinement_epochs": 15, "detector_refinement_learning_rate": 0.001,
     "detector_refinement_patience": 5, "detector_max_false_positive_rate": 0.05,
@@ -80,6 +88,7 @@ def quick_config(config):
             "predictor_epochs": 1, "generator_epochs": 1, "joint_epochs": 1,
             "correction_epochs": 2, "maximum_batches": 2, "maximum_engines": 18,
             "detector_refinement_epochs": 1, "detector_refinement_patience": 1,
+            "recovery_validation_severities": [0.2],
             "maximum_windows": 48, "batch_size": 8, "generator_hidden": 16,
             "cnn_channels": 8, "gru_hidden": 16, "transformer_dim": 32,
             "adversarial_warmup": 0, "background_size": 3, "mc_passes": 4,

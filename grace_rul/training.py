@@ -1,6 +1,7 @@
 """Staged training, grouped out-of-fold correction, calibration, and evaluation."""
 
 import copy
+import math
 import random
 import time
 from contextlib import contextmanager
@@ -98,6 +99,29 @@ def intact_identity_loss(repaired, reference, intact, config):
     return (error / budget).square().sum() / max(1, error.numel())
 
 
+def intact_tail_identity_loss(repaired, reference, intact, config):
+    """Protect rare window/channel groups that a whole-batch mean can hide.
+
+    Fault labels are training-only. Every group averages over its intact real
+    timesteps; the upper fraction of those group errors drives this extra term.
+    A truly altered reading is excluded, so large legitimate repairs remain
+    learnable. The original mean identity term is retained separately.
+    """
+    mask = intact.bool()
+    a = repaired.double().masked_fill(~mask, 0.)
+    b = reference.double().masked_fill(~mask, 0.)
+    method, scale = transform_spec(config)
+    error = (2 * scale * torch.cosh((a + b) / (2 * scale)) *
+             torch.sinh((a - b) / (2 * scale))) if method == "asinh" else a - b
+    budget = max(float(config["max_intact_repair_rmse"]), 1e-8)
+    counts = mask.sum(1)
+    groups = ((error / budget).square().sum(1) / counts.clamp_min(1))[counts > 0]
+    if not groups.numel():
+        return error.sum() * 0.
+    k = max(1, math.ceil(groups.numel() * config.get("identity_tail_fraction", .1)))
+    return groups.topk(k).values.mean()
+
+
 def finite_fault_loss(logits, altered, available, config):
     if config.get("detector_loss", "weighted") == "weighted":
         positives = (altered & available).sum((0, 1))
@@ -153,6 +177,11 @@ def objectives(model, batch, critic=None, consistency=True):
     error = result["repaired"] - batch["reference"][..., 3:]
     rec = masked_repair_loss(error, changed, model.config)
     identity = intact_identity_loss(result["repaired"], batch["reference"][..., 3:], intact, model.config)
+    # The deployed projection bounds actual finite moves. Penalize the gated
+    # proposal before projection too, so saturated unsafe proposals still learn
+    # from their healthy-cell labels instead of receiving a clipped zero grad.
+    identity_tail = (intact_tail_identity_loss(result["repair_proposal"], batch["reference"][..., 3:], intact, model.config)
+        if model.config.get("identity_tail_loss_weight", 0.) > 0 else identity * 0.)
     generator_rec = masked_repair_loss(result["generated"] - batch["reference"][..., 3:], changed, model.config)
     trend = repair_trend_loss(result["repaired"], batch["reference"][..., 3:], batch["altered"], batch["valid"], model.config)
     available = result["mask"].bool() & valid
@@ -186,11 +215,11 @@ def objectives(model, batch, critic=None, consistency=True):
                       model.config["branch_loss_weight"] * branch_objective(model, bypass, batch["target"]))
     adv = result["base"].sum() * 0 if critic is None else -critic(result["repaired"], batch["reference"][..., :3], batch["valid"]).mean()
     terms = {"rul": rul, "reconstruction": rec, "generator_reconstruction": generator_rec,
-             "identity": identity, "detection": detection, "trend": trend,
+             "identity": identity, "identity_tail": identity_tail, "detection": detection, "trend": trend,
              "adversarial": adv, "consistency": cons, "branch": branch, "clean_rul": clean_rul,
              "bypass_rul": bypass_rul}
     if not model.config["train_repair"]:
-        for name in ["reconstruction", "generator_reconstruction", "identity", "detection", "trend", "adversarial"]:
+        for name in ["reconstruction", "generator_reconstruction", "identity", "identity_tail", "detection", "trend", "adversarial"]:
             terms[name] = rul * 0
     loss = sum(model.config.get(f"{name}_loss_weight", 0.) * value for name, value in terms.items())
     return loss, {**result, "loss_terms": {name: value.detach() for name, value in terms.items()}}
@@ -343,6 +372,21 @@ def validate_training_config(config):
         raise ValueError("validate_bypass must be a boolean.")
     if config.get("identity_loss_space", "encoded") not in {"encoded", "original_linear"}:
         raise ValueError("identity_loss_space must be encoded or original_linear.")
+    if config.get("recovery_safety", "none") not in {"none", "fitted_support"}:
+        raise ValueError("recovery_safety must be none or fitted_support.")
+    if not 0 < config.get("identity_tail_fraction", .1) <= 1:
+        raise ValueError("identity_tail_fraction must be in (0, 1].")
+    if not isinstance(config.get("recovery_validation", False), bool):
+        raise ValueError("recovery_validation must be a boolean.")
+    if config.get("recovery_validation", False):
+        levels = config.get("recovery_validation_severities", [])
+        if (not isinstance(levels, (list, tuple)) or not levels or len(set(levels)) != len(levels) or
+                any(isinstance(x, bool) or not isinstance(x, (int, float)) or not np.isfinite(x) or not 0 < x <= 1 for x in levels)):
+            raise ValueError("recovery_validation_severities must contain distinct levels in (0, 1].")
+        for key in ["recovery_validation_max_channel_intact_rmse", "recovery_validation_max_window_intact_rmse", "recovery_validation_max_reconstruction_rmse"]:
+            value = config.get(key)
+            if value is not None and (isinstance(value, bool) or not np.isfinite(value) or value < 0):
+                raise ValueError(f"{key} must be None or finite and nonnegative.")
     if config.get("finite_repair_gate", "continuous") not in {"continuous", "validated_threshold"}:
         raise ValueError("Unknown finite_repair_gate.")
     if config.get("detector_training", "joint") not in {"joint", "separate"}:
@@ -470,11 +514,15 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
     scaler = OperatingRegimeScaler().fit(train_frame, subset, config["split_seed"],
         sensor_transform=config.get("sensor_transform", "linear"), sensor_transform_scale=config.get("sensor_transform_scale", 1.))
     model, critic = GraceRUL(config).to(device), TemporalCritic(config).to(device)
+    if config.get("recovery_safety") == "fitted_support":
+        from .recovery_safety import fit_recovery_envelope
+        model.set_recovery_envelope(fit_recovery_envelope(train_frame, scaler))
     train = WindowDataset(train_frame, scaler, config, seed=seed)
     clean_validation = WindowDataset(validation_frame, scaler, config, mode="validation", seed=config["validation_seed"], family="clean")
     corrupt_validation = WindowDataset(validation_frame, scaler, config, mode="validation", seed=config["validation_seed"], family="mixed")
     history, best_score, clean_reference = [], float("inf"), float("inf")
     warm_recovery, detector_audit, detector_history = None, None, []
+    selected_recovery_audit, recovery_audits, recovery_matrix = None, [], None
     clean_nasa_reference = float("inf")
     if checkpoint:
         model.load_state_dict(checkpoint["model"])
@@ -484,6 +532,8 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
         clean_nasa_reference = checkpoint.get("clean_nasa_reference", float("inf"))
         warm_recovery = checkpoint.get("warm_recovery")
         detector_audit, detector_history = checkpoint.get("detector_audit"), checkpoint.get("detector_history", [])
+        selected_recovery_audit = checkpoint.get("selected_recovery_audit")
+        recovery_audits = checkpoint.get("recovery_audits", [])
         restore_random_state(checkpoint["random_state"])
         progress.emit(f"resuming checkpoint: {checkpoint['stage']} epoch {checkpoint['next_epoch']} completed", force=True)
     stages = ["predictor"]
@@ -599,8 +649,28 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
             repair_guards = checkpoint_guards(clean, damaged, clean_reference, config, clean_nasa_reference=clean_nasa_reference)
             accepted = stage == "predictor" or all(repair_guards.values())
             selected_repair = stage != "predictor" and config["train_repair"]
+            candidate_recovery_audit = None
+            matrix_status = "not_applicable"
+            if selected_repair and config.get("recovery_validation", False):
+                if accepted and score < best_score:
+                    from .recovery_validation import RecoveryValidationMatrix, audit_recovery_candidate
+                    if recovery_matrix is None:
+                        recovery_matrix = RecoveryValidationMatrix(validation_frame, scaler, config, seed=config["validation_seed"])
+                    progress.emit(f"{label}: checking recovery across {len(recovery_matrix.datasets)} held-validation conditions", force=True)
+                    candidate_recovery_audit = audit_recovery_candidate(model, recovery_matrix, config,
+                        use_repair=True, stop_on_failure=True)
+                    accepted = candidate_recovery_audit["complete"] and candidate_recovery_audit["accepted"]
+                    matrix_status = "passed" if accepted else "rejected"
+                    recovery_audits.append({"stage": stage, "epoch": epoch + 1,
+                        "validation_macro_RMSE": score, "audit": candidate_recovery_audit})
+                else:
+                    matrix_status = "not_improving" if accepted else "primary_guards_rejected"
+                    accepted = False
             candidate_metrics = {"repair_validation_macro_RMSE": score,
                                  "repair_checkpoint_accepted": accepted,
+                                 "repair_matrix_status": matrix_status,
+                                 "repair_matrix_complete": candidate_recovery_audit["complete"] if candidate_recovery_audit else False,
+                                 "repair_matrix_worst_intact_RMSE": candidate_recovery_audit["worst"].get("linear_intact_repair_RMSE") if candidate_recovery_audit else None,
                                  "repair_validation_clean_RMSE": clean["RMSE"],
                                  "repair_validation_clean_NASA_Score_Mean": clean.get("NASA_Score_Mean"),
                                  "repair_validation_corrupt_NASA_Score_Mean": damaged.get("NASA_Score_Mean"),
@@ -644,6 +714,8 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
             if accepted and score < best_score:
                 best_score, best, stale = score, copy.deepcopy(model.state_dict()), 0
                 if stage != "predictor":
+                    selected_recovery_audit = candidate_recovery_audit if selected_repair else None
+                if stage != "predictor":
                     best["repair_enabled"] = torch.tensor(selected_repair, device=device)
                 if stage == "predictor":
                     clean_reference = clean["RMSE"]
@@ -666,6 +738,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                     "clean_reference": clean_reference,
                     "clean_nasa_reference": clean_nasa_reference,
                     "detector_audit": detector_audit, "detector_history": detector_history,
+                    "selected_recovery_audit": selected_recovery_audit, "recovery_audits": recovery_audits,
                     "warm_recovery": warm_recovery,
                     "best": best, "best_score": best_score, "stale": stale, "history": history, "random_state": random_state()})
             if stale >= config["patience"]:
@@ -679,6 +752,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
     model.pretrained_clean_rmse = float(clean_reference)
     model.pretrained_clean_nasa = float(clean_nasa_reference)
     model.detector_audit, model.detector_history = detector_audit, pd.DataFrame(detector_history)
+    model.recovery_validation_audit, model.recovery_validation_history = selected_recovery_audit, recovery_audits
     return model.eval(), scaler, pd.DataFrame(history), best_score
 
 

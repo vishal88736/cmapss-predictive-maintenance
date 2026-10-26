@@ -30,7 +30,7 @@ def add_cell(kind, source, tags=None):
 md("""
 # GRACE-RUL: corruption, recovery, prediction, and sensor fault explanations
 
-This notebook implements the current architecture in `docs/RECOVERY_V7.md`;
+This notebook implements the current architecture in `docs/RECOVERY_V8.md`;
 `docs/FINAL_ARCHITECTURE.md` preserves the original paper integration:
 **fault detector → selective BiLSTM recovery with WGAN-GP → gated CNN–GRU / Transformer → bounded residual correction → SHAP + LIME**.
 
@@ -46,11 +46,13 @@ Set it to `True` only for a small FD001 execution check. Quick artifacts are cle
 labeled and are not benchmark evidence. A full run has a substantial compute cost.
 Neither this notebook nor its artifact claims superiority before matched experiments.
 
-Format 7 uses invertible asinh sensor inputs, original-linear intact identity loss,
-a separately fitted frozen detector, validation-thresholded repair gates, shared
-clean RMSE/NASA guards, and target-specific engine-prefix conformal intervals.
-A new training directory is required. Format-5/6 weights remain loadable for
-inference and historical comparisons; new performance requires fresh training.
+Format 8 adds fitting-only clean support for directed finite-repair bounds,
+upper-tail healthy-proposal supervision, and mandatory recovery validation across
+all declared fault families/severities. Large outlier recovery remains possible.
+A frozen format-7 safety upgrade is available in `scripts/upgrade_recovery_safety.py`;
+it recalibrates the exact changed model and exports only if held-validation guards pass.
+New full training requires a fresh directory. Format-5/6/7 artifacts preserve
+their historical inference behavior; improved accuracy must be measured.
 """)
 code("""
 from pathlib import Path
@@ -98,7 +100,13 @@ linear sensor error; intact-reading protection is checked before asinh compressi
 The curriculum reaches full fault severity within ten epochs, before default patience expires.
 Corruption labels supervise detection/recovery only; they are never inference features.
 The critic is training-only. Training targets are capped at 125; evaluation reports capped
-and original official targets separately. Intact identity loss uses original linear
+and original official targets separately. Fitting-only per-regime support bounds
+limit finite changes inside the clean fitting range to the intact-error budget;
+outliers can return throughout the fitting range. Missing-input imputation is
+unchanged. A top-10% window/channel healthy-proposal term retains gradients even
+when the deployed repair is clamped. Every improving repair candidate must pass
+all declared fault/severity conditions on held training-validation engines.
+Intact identity loss uses original linear
 sensor error normalized by its protection budget, even with asinh model inputs.
 
 Partition and validation/evaluation corruption seeds are fixed across training seeds. Validation samples
@@ -257,10 +265,10 @@ epochs (including OOF models) are saved in the printed run directory's `checkpoi
 To resume after interrupting, restart the kernel and rerun setup/configuration with
 the same settings, then pass that run directory as `output_dir` to `run_experiment`.
 Completed upstream models load from checkpoints; correction and evaluation rerun.
-Format 7 changes detector fitting, recovery gating, identity loss, checkpoint guards,
-and interval contracts while preserving physical `structured-sensor-faults-v4`
-mechanisms. All format-5/6 training checkpoints require a fresh directory.
-Format-5/6 bundles remain inference-compatible;
+Format 8 adds fitting-support bounds, upper-tail healthy-proposal training,
+and recovery validation over every declared fault family/severity while preserving physical `structured-sensor-faults-v4`
+mechanisms. All format-5/6/7 training checkpoints require a fresh directory.
+Format-5/6/7 bundles remain inference-compatible;
 older format-3/4 bundles are incompatible.
 
 Three-fold metrics evaluate the detector/recovery/predictor on held-out fitting engines
@@ -323,10 +331,10 @@ for name in ['robustness_summary', 'ablation_metrics', 'validation_search', 'tes
 md("""
 ## Reload the exact website artifact and inspect recovery
 
-The format-7 bundle contains weights, selected per-subset settings, repair/bound buffers, correction, sensor thresholds,
+The format-8 bundle contains weights, selected per-subset settings, repair/bound buffers, correction, sensor thresholds,
 validated repair gates, detector fitting audits, separate capped/raw interval contracts,
 fitting-only explanation backgrounds, source hashes, and
-engine split audits. It can be loaded with `weights_only=True`. Format-5/6 bundles
+engine split audits. It can be loaded with `weights_only=True`. Format-5/6/7 bundles
 retain their original preprocessing and inference behavior; new training requires a
 fresh run directory. Incompatible older artifacts are rejected.
 """)

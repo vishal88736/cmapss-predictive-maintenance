@@ -4,7 +4,8 @@ Corrupt sensor data during training, detect damaged readings, recover degradatio
 signals, and predict remaining useful life. The notebook and website share one
 PyTorch implementation in `grace_rul/`.
 
-- [Current format-7 repairs and training commands](docs/RECOVERY_V7.md)
+- [Current format-8 healthy-sensor protection](docs/RECOVERY_V8.md)
+- [Earlier format-7 repair](docs/RECOVERY_V7.md)
 - [Target-specific interval calibration](docs/CALIBRATION_PROTOCOL.md)
 - [Earlier format-6 repair](docs/RECOVERY_V6.md)
 - [Earlier design rationale and paper analysis](docs/FINAL_ARCHITECTURE.md)
@@ -19,22 +20,27 @@ PyTorch implementation in `grace_rul/`.
 
 ## Recovery stability check
 
-Format 7 protects intact readings in original linear sensor space, fits the finite-fault
-detector separately, and freezes it during recovery/joint training. Validation-selected
-thresholds protect intact channels in clean, stuck, mixed, and other fault contexts.
-Recovery can still be rejected by the unchanged safety limits. Clean validation RMSE
-and mean NASA score share one original-predictor tolerance across later stages.
-Capped and raw targets have separate engine-level conformal interval contracts.
-Existing format-5/6 runs remain historical evidence; new performance requires training.
+Format 8 bounds finite repairs using clean fitting-engine support. Readings inside
+that support have an original-linear change budget; large outliers can still
+return throughout the fitted clean range. Missing-input recovery stays active.
+Training adds an upper-tail healthy-proposal penalty, and recovery selection must
+pass every declared validation fault family and severity (41 conditions by default).
+These are safeguards, not a guarantee for healthy readings outside fitting support.
+
+Existing trained format-7 weights can receive the safeguards and fresh independent
+calibration without retraining, if all validation guards pass:
 
 ```bash
 source minor/bin/activate
-python scripts/check_recovery_fix.py --pilot --device cpu
+python scripts/upgrade_recovery_safety.py \
+  --source-model artifacts/recovery_v7_20261026_191710/grace_rul_ALL.pt \
+  --output-dir "artifacts/recovery_v8_safety_$(date -u +%Y%m%d_%H%M%S)"
 ```
 
-This pilot uses training-file fitting/validation engines with full tensor dimensions
-and small budgets. See [RECOVERY_V7.md](docs/RECOVERY_V7.md) for exact scope,
-compatibility, and fresh-directory CUDA commands. Generated runs stay out of GitHub.
+The upgrade reads training-file fitting/validation/calibration engines only, freezes
+all neural tensors, and refuses export if guards fail. It does not copy old results
+as new measurements. Full format-8 training remains available; see
+[RECOVERY_V8.md](docs/RECOVERY_V8.md). Previous runs and manuscript results remain historical.
 
 ## Environment and notebook
 
@@ -68,7 +74,7 @@ also tries stride 5. Official test predictions use the last observed endpoint pe
 The same workflow is available without a notebook:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v7
+.venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v8
 ```
 
 For a small CPU check including tuning and trained comparisons:
@@ -81,7 +87,7 @@ The default command still includes many temporary fold models. To also run the
 separate comparisons and extended evaluation reports, use:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_v7_paper_study
+.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_v8_paper_study
 ```
 
 In the notebook, set `RUN_PAPER_STUDY = True` before training to enable both reports.
@@ -127,7 +133,7 @@ loaded; correction features, the small residual corrector, and evaluations are
 recomputed. A changed training configuration, architecture, or engine data requires
 a new run directory. Report switches can change without invalidating completed
 upstream epochs; rerun with the same output directory to reuse them.
-Format-7 training requires a fresh directory. Format-5/6 bundles remain readable
+Format-8 training requires a fresh directory. Format-5/6/7 bundles remain readable
 for inference; format-3/4 bundles remain incompatible. The interrupted October
 8 run and its notebook outputs were removed during the October 11 audit.
 
@@ -154,9 +160,9 @@ The observation rows in C-MAPSS represent consecutive cycles.
 
 This changes training data. Start a fresh run directory for checkpoints created
 before this correction; the new training identity rejects the earlier protocol.
-Format 7 retains asinh inputs and structured faults, with separately validated frozen
+Format 8 retains asinh inputs and structured faults, with separately validated frozen
 detection, thresholded recovery, original-linear intact supervision, and target-specific
-calibration. Earlier format-5/6 bundles remain loadable with their original inference behavior.
+calibration. Earlier format-5/6/7 bundles remain loadable with their original inference behavior.
 New bundles and run manifests record the corruption protocol explicitly.
 
 ## What the notebook implements
@@ -211,7 +217,7 @@ cd ..
 ```
 
 Open <http://127.0.0.1:8000>. A visible placeholder accepts upload previews while
-training is pending. Supported full format-5/6/7 bundles are discovered automatically after
+training is pending. Supported full format-5/6/7/8 bundles are discovered automatically after
 training; status identifies the loaded format. The model page displays only results recorded by the connected run.
 Sensor reports show affected cycles, scores and thresholds, recovered readings,
 and on-demand SHAP/LIME explanations. Quick artifacts are excluded from automatic

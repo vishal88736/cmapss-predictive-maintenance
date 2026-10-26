@@ -134,6 +134,11 @@ class GraceRUL(nn.Module):
         # sensor thresholds. Missing observations still route to the generator.
         self.register_buffer("finite_repair_thresholds", torch.ones(21),
             persistent=config.get("finite_repair_gate") == "validated_threshold")
+        supported = config.get("recovery_safety") == "fitted_support"
+        self.register_buffer("recovery_centers", torch.zeros(6, 3), persistent=supported)
+        self.register_buffer("recovery_lower", torch.zeros(6, 21), persistent=supported)
+        self.register_buffer("recovery_upper", torch.zeros(6, 21), persistent=supported)
+        self.register_buffer("recovery_regime_count", torch.tensor(0), persistent=supported)
         self.detector = FaultDetector(config)
         self.generator = SensorGenerator(config)
         self.predictor = RULPredictor(config) if config["predictor_family"] == "gated" else SingleBranchPredictor(config)
@@ -142,6 +147,29 @@ class GraceRUL(nn.Module):
         self.corrector = nn.Sequential(nn.Linear(67, 32), nn.ReLU(), nn.Linear(32, 1))
         nn.init.zeros_(self.corrector[-1].weight)
         nn.init.zeros_(self.corrector[-1].bias)
+
+    @torch.no_grad()
+    def set_recovery_envelope(self, profile):
+        """Attach clean fitting support in normalized model coordinates."""
+        from .normalization import transform_spec
+        if self.config.get("recovery_safety") != "fitted_support":
+            raise ValueError("This model does not use fitting-support recovery.")
+        if transform_spec(profile) != transform_spec(self.config):
+            raise ValueError("Recovery support and model sensor transforms disagree.")
+        centers = torch.as_tensor(profile["centers"], device=self.recovery_centers.device, dtype=self.recovery_centers.dtype)
+        lower = torch.as_tensor(profile["lower"], device=self.recovery_lower.device, dtype=self.recovery_lower.dtype)
+        upper = torch.as_tensor(profile["upper"], device=self.recovery_upper.device, dtype=self.recovery_upper.dtype)
+        count = len(centers)
+        if (not 1 <= count <= 6 or centers.shape != (count, 3) or
+                lower.shape != (count, 21) or upper.shape != lower.shape or
+                not all(bool(torch.isfinite(x).all()) for x in [centers, lower, upper]) or
+                bool((lower > upper).any())):
+            raise ValueError("Invalid fitting-support recovery profile.")
+        self.recovery_centers.zero_(); self.recovery_lower.zero_(); self.recovery_upper.zero_()
+        self.recovery_centers[:count].copy_(centers)
+        self.recovery_lower[:count].copy_(lower); self.recovery_upper[:count].copy_(upper)
+        self.recovery_regime_count.fill_(count)
+        self.recovery_support = dict(profile)
 
     def forward(self, x, valid=None, use_repair=True, use_correction=True, branch=None, equal_fusion=None):
         use_repair = use_repair and self.config["train_repair"] and bool(self.repair_enabled)
@@ -160,14 +188,27 @@ class GraceRUL(nn.Module):
             threshold = self.finite_repair_thresholds
             finite_weights = gate_scores * ((gate_scores >= threshold) & (threshold < 1))
         weights = ((1 - mask) + mask * finite_weights) * valid.unsqueeze(-1)
-        repaired = ((1 - weights) * observed + weights * generated) * valid.unsqueeze(-1) if use_repair else observed
+        repair_proposal = ((1 - weights) * observed + weights * generated) * valid.unsqueeze(-1) if use_repair else observed
+        repaired = repair_proposal
+        if use_repair and self.config.get("recovery_safety") == "fitted_support":
+            from .recovery_safety import bounded_finite_repair
+            count = int(self.recovery_regime_count)
+            if count:
+                regimes = ((settings.unsqueeze(-2) - self.recovery_centers[:count]) ** 2).sum(-1).argmin(-1)
+                lower, upper = self.recovery_lower[regimes], self.recovery_upper[regimes]
+            else:
+                # An unconfigured model has no evidence for large finite moves.
+                # Training and artifact loading attach fitting-only support.
+                lower = upper = observed
+            repaired = bounded_finite_repair(observed, repaired, mask.bool(), valid,
+                lower, upper, self.config)
         result = self.predictor(repaired, settings, mask, weights if use_repair else torch.zeros_like(weights), observed, valid, branch, equal_fusion)
         features = torch.cat([result["quality"], result["base"][:, None] / self.config["target_scale"],
             result["local_prediction"][:, None] / self.config["target_scale"], result["global_prediction"][:, None] / self.config["target_scale"]], -1)
         delta = self.correction_bound * self.corrector(features).tanh().flatten() if use_correction else torch.zeros_like(result["base"])
         return {**result, "prediction": (result["base"] + delta).clamp_min(0), "delta": delta,
                 "correction_features": features, "logits": logits, "fault_scores": probabilities,
-                "generated": generated, "repaired": repaired, "mask": mask, "weights": weights, "observed": observed}
+                "generated": generated, "repair_proposal": repair_proposal, "repaired": repaired, "mask": mask, "weights": weights, "observed": observed}
 
 
 class SingleBranchPredictor(nn.Module):

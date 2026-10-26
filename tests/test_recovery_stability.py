@@ -146,7 +146,8 @@ class CrossRegimeRecovery(unittest.TestCase):
         config = quick_config({**DEFAULT_CONFIG, "device":"cpu"})
         for key in ['sensor_transform','sensor_transform_scale','repair_loss','repair_huber_beta','detector_loss',
                     'validate_bypass','bypass_rul_loss_weight','max_linear_reconstruction_ratio',
-                    'finite_repair_gate','detach_repair_gate','detector_training','identity_loss_space']:
+                    'finite_repair_gate','detach_repair_gate','detector_training','identity_loss_space',
+                    'recovery_safety']:
             config.pop(key)
         model = GraceRUL(config).eval()
         profile = self.profile()
