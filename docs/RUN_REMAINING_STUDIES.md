@@ -4,9 +4,11 @@ Run these stages in order. Each stage has a distinct purpose. Evaluation and
 explanations do not retrain weights. Fresh format-8 training is needed to measure
 the revised recovery/selection recipe. A passing guard does not force better RUL accuracy.
 The frozen evaluation and first window-guard training run have already been
-completed locally. Their reviews are under their respective `artifacts/` run
-directories. Continue with the revised step 3; repeating evaluation does not repair
-the model. See [the FD002/FD004 investigation](RECOVERY_BALANCE.md).
+completed locally. The frozen model and its evaluation remain available; the first
+training run's results/review are archived under `artifacts/retired_evidence/` after
+its weaker weights and checkpoints were removed. Continue with the revised step 3;
+repeating evaluation does not repair the model. See
+[the FD002/FD004 investigation](RECOVERY_BALANCE.md).
 
 ## 1. Activate the existing minor environment
 
@@ -80,8 +82,10 @@ test row to choose settings, seeds, guards or explanations.
 ## 3. Train the new objective on FD002/FD004 first
 
 The first `v8_window_guard.json` run retained FD002 bypass after missing-input
-reconstruction rejection and regressed on FD004 clean test RMSE. Its weights and
-results remain preserved. The next full-dimension experiment uses
+reconstruction rejection and regressed on FD004 clean test RMSE. Its result records
+remain under `artifacts/retired_evidence/v8_training_20261028_183317/`; its weights
+and checkpoints were retired at the user's request. The next full-dimension
+experiment uses
 `configs/v8_recovery_balance.json` at one training seed on the two problem subsets.
 It adds separate physical-scale imputation supervision, stable log-tail training,
 balanced fitting fault contexts, a clean pretraining anchor and equal-family

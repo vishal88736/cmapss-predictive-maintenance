@@ -29,20 +29,23 @@ Training adds an upper-tail healthy-proposal penalty, and recovery selection mus
 pass every declared validation fault family and severity (41 conditions by default).
 These are safeguards, not a guarantee for healthy readings outside fitting support.
 
-Existing trained format-7 weights can receive the safeguards and fresh independent
-calibration without retraining, if all validation guards pass:
+The retained verified local bundle is:
 
-```bash
-source minor/bin/activate
-python scripts/upgrade_recovery_safety.py \
-  --source-model artifacts/recovery_v7_20261026_191710/grace_rul_ALL.pt \
-  --output-dir "artifacts/recovery_v8_safety_$(date -u +%Y%m%d_%H%M%S)"
+```text
+artifacts/recovery_v8_safety_20261027/grace_rul_ALL.pt
 ```
 
-The upgrade reads training-file fitting/validation/calibration engines only, freezes
-all neural tensors, and refuses export if guards fail. It does not copy old results
-as new measurements. Full format-8 training remains available; see
-[RECOVERY_V8.md](docs/RECOVERY_V8.md). Previous runs and manuscript results remain historical.
+It supports FD002/FD004; its full frozen evaluation is saved in
+`artifacts/v8_eval_20261028_180741/`. Superseded model weights, checkpoints and old
+execution-check bundles were removed at the user's request. Their unmodified
+result/review records remain under ignored `artifacts/retired_evidence/`, including
+the failed runs. This leaves one usable trained run for automatic website discovery.
+Legacy FD001/FD003 weights were retired with the old format-5 run; their data and
+historical measurements remain available for fresh training.
+
+For a separately retained format-7 source, the frozen upgrade tool remains
+documented in [RECOVERY_V8.md](docs/RECOVERY_V8.md). Full format-8 training remains
+available. Previous runs and manuscript results remain historical.
 
 The latest FD002/FD004 training review found missing-input reconstruction rejection
 and a weaker clean pretraining checkpoint. The opt-in

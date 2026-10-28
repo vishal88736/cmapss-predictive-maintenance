@@ -3,8 +3,12 @@
 The October 28 fresh format-8 run did not establish better RUL performance.
 FD002 retained a bypass because missing-input reconstruction failed validation;
 FD004 passed the recovery matrix but its clean test RMSE regressed. The local
-review is `artifacts/v8_training_20261028_183317/review_20261029/RESULTS_REVIEW.md`.
-Those artifacts remain unchanged. This training-only revision requires a new run.
+review is now archived at
+`artifacts/retired_evidence/v8_training_20261028_183317/review_20261029/RESULTS_REVIEW.md`.
+The user requested removal of the weaker run's weights/checkpoints. Its historical
+measurements and reviews remain unchanged in that archive. The retained model is
+`artifacts/recovery_v8_safety_20261027/grace_rul_ALL.pt`, with its measured frozen
+evaluation in `artifacts/v8_eval_20261028_180741/`. This revision requires a new run.
 It does not change the inference architecture, format-8 tensor schema, physical
 fault simulator, or measured historical results.
 
@@ -102,12 +106,14 @@ Individual faults can still worsen. These are development-validation measurement
 from short generator fine-tuning, not new official test results, full-run acceptance
 or evidence of superiority to the papers.
 
-To repeat that diagnostic in a new directory:
+The pilot's source weights have since been retired at the user's request; its
+saved evidence remains available. To repeat the diagnostic after a future complete
+training run, replace `completed_training_run` below with that actual run directory:
 
 ```bash
 source minor/bin/activate
 python -u scripts/check_recovery_balance.py \
-  --source-run artifacts/v8_training_20261028_183317 \
+  --source-run artifacts/completed_training_run \
   --steps 40 --device cpu \
   --output-dir "artifacts/recovery_balance_pilot_$(date -u +%Y%m%d_%H%M%S)"
 ```
