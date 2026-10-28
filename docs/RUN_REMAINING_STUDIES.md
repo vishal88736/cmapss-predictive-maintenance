@@ -2,7 +2,11 @@
 
 Run these stages in order. Each stage has a distinct purpose. Evaluation and
 explanations do not retrain weights. Fresh format-8 training is needed to measure
-the new tail-loss recipe. A passing guard does not force better RUL accuracy.
+the revised recovery/selection recipe. A passing guard does not force better RUL accuracy.
+The frozen evaluation and first window-guard training run have already been
+completed locally. Their reviews are under their respective `artifacts/` run
+directories. Continue with the revised step 3; repeating evaluation does not repair
+the model. See [the FD002/FD004 investigation](RECOVERY_BALANCE.md).
 
 ## 1. Activate the existing minor environment
 
@@ -75,21 +79,28 @@ test row to choose settings, seeds, guards or explanations.
 
 ## 3. Train the new objective on FD002/FD004 first
 
-The frozen upgrade did not optimize the new tail loss. This smaller full-dimension
-experiment tests that recipe on the two problem subsets at one training seed.
+The first `v8_window_guard.json` run retained FD002 bypass after missing-input
+reconstruction rejection and regressed on FD004 clean test RMSE. Its weights and
+results remain preserved. The next full-dimension experiment uses
+`configs/v8_recovery_balance.json` at one training seed on the two problem subsets.
+It adds separate physical-scale imputation supervision, stable log-tail training,
+balanced fitting fault contexts, a clean pretraining anchor and equal-family
+validation selection. The short development pilot supports FD002 imputation, but
+does not establish a full FD004 RUL improvement.
 
-`configs/v8_window_guard.json` adds **validation** maximum channel and maximum
-window healthy-RMSE limits of 0.15, in original-linear regime z-score units. This
-is a declared policy choice, not a desired accuracy. It addresses the distinction
-between an aggregate pass and a bad individual window. It can reject recovery and
-retain a bypass, and it provides no universal unseen-window guarantee. The
-observed-inlier protection remains conditional on fitting support.
+The recipe retains **validation** maximum channel and maximum window healthy-RMSE
+limits of 0.15, in original-linear regime z-score units, along with the existing
+aggregate, reconstruction and clean RUL/NASA guards. It can reject recovery and
+retain a bypass. These are declared policies, not desired accuracies, and they
+provide no universal unseen-window guarantee. Observed-inlier protection remains
+conditional on fitting support. Selection now evaluates nine fixed validation
+contexts per call instead of two, so validation takes longer.
 
 ```bash
-v8_train_dir="artifacts/v8_tail_window_$(date -u +%Y%m%d_%H%M%S)"
+v8_train_dir="artifacts/v8_recovery_balance_$(date -u +%Y%m%d_%H%M%S)"
 python -u scripts/train_research.py \
   --device cuda --subsets FD002 FD004 --seeds 42 \
-  --config configs/v8_window_guard.json \
+  --config configs/v8_recovery_balance.json \
   --skip-tuning --skip-benchmarks --extended-evaluation \
   --output-dir "$v8_train_dir" \
   2>&1 | tee "${v8_train_dir}.log"
@@ -108,9 +119,9 @@ fresh timestamp when trying to resume. Correction/evaluation may rerun. Changing
 guards, model dimensions, subsets or seed lists requires a fresh training
 directory; never resume format-7 checkpoints as format 8.
 
-The supplied guard file is an explicit stronger-validation experiment. If using
-the default aggregate-only policy instead, omit `--config` before starting and
-record that choice. Do not select between these policies using test errors.
+The supplied recipe is an explicit development experiment. Omitting `--config`
+retains the earlier training policy, without these changes. Changing the recipe
+requires a fresh directory. Do not select between policies using test errors.
 
 ## 4. Run model explanations after a bundle exists
 
@@ -151,7 +162,7 @@ v8_study_dir="artifacts/v8_all_subsets_$(date -u +%Y%m%d_%H%M%S)"
 python -u scripts/train_research.py \
   --device cuda --subsets FD001 FD002 FD003 FD004 \
   --seeds 42 123 2026 314 777 \
-  --config configs/v8_window_guard.json \
+  --config configs/v8_recovery_balance.json \
   --skip-tuning --skip-benchmarks --extended-evaluation \
   --output-dir "$v8_study_dir" \
   2>&1 | tee "${v8_study_dir}.log"
@@ -169,7 +180,7 @@ can change without invalidating completed primary upstream checkpoints:
 python -u scripts/train_research.py \
   --device cuda --subsets FD001 FD002 FD003 FD004 \
   --seeds 42 123 2026 314 777 \
-  --config configs/v8_window_guard.json \
+  --config configs/v8_recovery_balance.json \
   --skip-tuning --paper-study \
   --output-dir "$v8_study_dir" \
   2>&1 | tee "${v8_study_dir}_comparisons.log"

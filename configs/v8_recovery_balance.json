@@ -1,0 +1,10 @@
+{
+  "identity_tail_penalty": "log_mse",
+  "imputation_loss_weight": 1.0,
+  "recovery_sampling": "balanced",
+  "recovery_train_severities": [0.1, 0.2, 0.3],
+  "clean_pretraining_selection": "clean_rmse",
+  "rul_selection": "fault_macro",
+  "recovery_validation_max_channel_intact_rmse": 0.15,
+  "recovery_validation_max_window_intact_rmse": 0.15
+}

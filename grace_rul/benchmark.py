@@ -17,7 +17,7 @@ from .checkpoints import matches_pipeline_identity, pipeline_identity
 from .config import DEFAULT_CONFIG, SUBSETS
 from .data import FAULTS, OperatingRegimeScaler, WindowDataset, load_subset, source_hashes, window_view
 from .model import GraceRUL
-from .training import device_for, evaluate, exposure_metrics, fit_corrector, fit_pipeline, metrics, select_fault_thresholds, validation_score
+from .training import device_for, evaluate, exposure_metrics, fit_corrector, fit_pipeline, metrics, select_fault_thresholds, validation_datasets, validation_score
 
 
 VARIANTS = {
@@ -229,9 +229,9 @@ def run_matched_benchmarks(project_root, run_dir, config):
                         torch.nn.init.zeros_(model.corrector[-1].weight)
                         torch.nn.init.zeros_(model.corrector[-1].bias)
                     variant_scaler, history = scaler, pd.DataFrame()
-                    clean_val = WindowDataset(validation, scaler, trial, mode="validation", seed=trial["validation_seed"], family="clean")
-                    mixed_val = WindowDataset(validation, scaler, trial, mode="validation", seed=trial["validation_seed"], family="mixed")
-                    score, _, _ = validation_score(model, clean_val, mixed_val, trial)
+                    clean_val, mixed_val, selection_contexts = validation_datasets(validation, scaler, trial)
+                    selection_options = {"selection_datasets": selection_contexts} if selection_contexts is not None else {}
+                    score, _, _ = validation_score(model, clean_val, mixed_val, trial, **selection_options)
                 else:
                     model, variant_scaler, history, score = fit_pipeline(fit, validation, subset, trial, seed,
                         checkpoint_path=directory / f"{subset}_{seed}.pt", progress_label=f"{subset} {variant} seed={seed}")

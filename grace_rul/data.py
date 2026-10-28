@@ -146,6 +146,7 @@ def make_window(values, end, length):
 class WindowDataset(Dataset):
     def __init__(self, frame, scaler, config, mode="train", seed=42, family=None, severity=.2, truths=None):
         self.config, self.seed, self.family, self.severity = config, int(seed), family, severity
+        self.mode = mode
         self.epoch, self.progress, self.cache, self.fault_metadata = 0, 1., {}, {}
         self.fault_profile = getattr(scaler, "state", None)
         self.engines, self.samples = [], []
@@ -171,9 +172,35 @@ class WindowDataset(Dataset):
             self.samples.extend((engine_index, int(end)) for end in ends)
         if mode == "train" and config.get("maximum_windows") and len(self.samples) > config["maximum_windows"]:
             self.samples = [self.samples[i] for i in sorted(rng.choice(len(self.samples), config["maximum_windows"], replace=False))]
+        self.recovery_plans = self._recovery_plans()
+
+    def _recovery_plans(self):
+        """Stratify fitting engines across faults, retaining trajectory consistency.
+
+        No RUL, trajectory length, future measurements or held-out frame defines
+        this assignment. Engine-balanced sampling keeps long engines from
+        dominating a family. This is an epoch plan, not a batch quota.
+        """
+        if self.mode != "train" or self.family is not None or self.config.get("recovery_sampling", "random") != "balanced":
+            return None
+        cases = [(family, level) for family in [*FAULTS, "mixed"]
+                 for level in self.config.get("recovery_train_severities", [.1, .2, .3])]
+        clean = self.config["clean_fraction"]
+        rng = np.random.default_rng(np.random.SeedSequence([self.seed, self.epoch, 4831]))
+        plans = {}
+        for rank, engine in enumerate(rng.permutation(len(self.engines))):
+            fraction = (rank + .5) / len(self.engines)
+            if fraction < clean:
+                plans[int(engine)] = ("clean", 0.)
+            else:
+                case = min(len(cases) - 1, int((fraction - clean) / (1 - clean) * len(cases)))
+                family, severity = cases[(case + self.epoch) % len(cases)]
+                plans[int(engine)] = (family, float(severity * max(.3, self.progress)))
+        return plans
 
     def set_epoch(self, epoch, progress=1.):
         self.epoch, self.progress, self.cache, self.fault_metadata = int(epoch), progress, {}, {}
+        self.recovery_plans = self._recovery_plans()
 
     def __len__(self):
         return len(self.samples)
@@ -183,8 +210,10 @@ class WindowDataset(Dataset):
         engine = self.engines[engine_index]
         if engine_index not in self.cache:
             rng = np.random.default_rng(np.random.SeedSequence([self.seed, self.epoch, engine["unit"]]))
+            family, severity = (self.recovery_plans[engine_index] if self.recovery_plans is not None
+                                else (self.family, self.severity))
             damaged, labels, metadata = corrupt_trajectory(
-                engine["values"], rng, self.family, self.severity, self.config["clean_fraction"], self.progress,
+                engine["values"], rng, family, severity, self.config["clean_fraction"], self.progress,
                 start_horizon=self.config.get("fault_start_horizon", 100),
                 drift_ramp_cycles=self.config.get("drift_ramp_cycles", 100),
                 block_gap_cycles=self.config.get("block_gap_cycles", 50),

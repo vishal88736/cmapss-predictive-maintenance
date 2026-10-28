@@ -102,9 +102,13 @@ Corruption labels supervise detection/recovery only; they are never inference fe
 The critic is training-only. Training targets are capped at 125; evaluation reports capped
 and original official targets separately. Fitting-only per-regime support bounds
 limit finite changes inside the clean fitting range to the intact-error budget;
-outliers can return throughout the fitting range. Missing-input imputation is
-unchanged. A top-10% window/channel healthy-proposal term retains gradients even
-when the deployed repair is clamped. Every improving repair candidate must pass
+outliers can return throughout the fitting range. The recovery-balance recipe adds
+a separate original-linear missing-input loss relative to the mean-fill baseline.
+It stratifies fitting engines over all eight fault contexts and three severities,
+retaining clean examples and consistent overlapping windows. A top-10%
+window/channel healthy-proposal term retains gradients even when the deployed
+repair is clamped. Its log(1 + normalized MSE) form limits extreme-loss domination;
+acceptance still measures ordinary RMSE. Every improving repair candidate must pass
 all declared fault/severity conditions on held training-validation engines.
 Intact identity loss uses original linear
 sensor error normalized by its protection budget, even with asinh model inputs.
@@ -129,9 +133,13 @@ related mechanisms on the same channels and onset. Each mechanism has an indepen
 random stream. Temporary blocks recur with gaps up to `block_gap_cycles` (50).
 These are structured sensor-error simulations; measured field-fault parameters are
 unavailable. Reports separate active faults from unaffected windows.
-Selection averages clean and active-mixed-fault RMSE; changing the training clean
-fraction does not change the fixed validation faults. Checkpoints from earlier
-simulators require a fresh run directory.
+The recovery-balance recipe selects clean pretraining by clean validation RMSE.
+Later stages, correction and seeds use half clean RMSE plus half the mean active-fault
+RMSE over all eight contexts at severity 0.2. The unchanged mixed reconstruction
+guards and full recovery matrix remain separate acceptance requirements. Changing
+the training clean fraction does not change fixed validation faults. These are
+training changes awaiting full retraining evidence, not established accuracy gains.
+Use a fresh directory for this recipe; do not resume an earlier recipe's checkpoints.
 Use `nvidia-smi` and the GPU check in README.md before starting. An intentional CPU
 execution check requires changing the device to `'cpu'`.
 """)
@@ -139,8 +147,11 @@ code("""
 QUICK_RUN = False
 RUN_PAPER_STUDY = False
 RUN_EXPLANATIONS = False
+USE_RECOVERY_BALANCE_RECIPE = True
 CONFIG = dict(DEFAULT_CONFIG)
 CONFIG['device'] = 'cuda'
+if USE_RECOVERY_BALANCE_RECIPE:
+    CONFIG.update(json.loads((PROJECT_ROOT / 'configs' / 'v8_recovery_balance.json').read_text()))
 if QUICK_RUN:
     CONFIG = quick_config(CONFIG)
 if RUN_PAPER_STUDY:
@@ -260,7 +271,8 @@ the deployable fallback is preserved separately. Joint training can retain
 the selected repair checkpoint. Correction uses observable summaries and predictions
 across folds, searches bounds of 5/10/15/30 cycles, and retains a zero-correction fallback.
 Final seeds are selected after
-correction using clean/mixed validation RMSE. Completed upstream
+correction using the configured held-validation objective. The enabled recovery-balance
+recipe uses the equal-family fault macro; legacy defaults use clean/mixed RMSE. Completed upstream
 epochs (including OOF models) are saved in the printed run directory's `checkpoints/`.
 To resume after interrupting, restart the kernel and rerun setup/configuration with
 the same settings, then pass that run directory as `output_dir` to `run_experiment`.

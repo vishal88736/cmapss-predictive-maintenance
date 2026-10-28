@@ -5,6 +5,7 @@ signals, and predict remaining useful life. The notebook and website share one
 PyTorch implementation in `grace_rul/`.
 
 - [Current format-8 healthy-sensor protection](docs/RECOVERY_V8.md)
+- [FD002/FD004 training repair and validation pilot](docs/RECOVERY_BALANCE.md)
 - [Run the remaining evaluation, training and paper studies](docs/RUN_REMAINING_STUDIES.md)
 - [Earlier format-7 repair](docs/RECOVERY_V7.md)
 - [Target-specific interval calibration](docs/CALIBRATION_PROTOCOL.md)
@@ -43,6 +44,14 @@ all neural tensors, and refuses export if guards fail. It does not copy old resu
 as new measurements. Full format-8 training remains available; see
 [RECOVERY_V8.md](docs/RECOVERY_V8.md). Previous runs and manuscript results remain historical.
 
+The latest FD002/FD004 training review found missing-input reconstruction rejection
+and a weaker clean pretraining checkpoint. The opt-in
+`configs/v8_recovery_balance.json` recipe adds a physical-scale imputation objective,
+stable tail-loss gradients, balanced fault exposure, a clean pretraining anchor and
+equal-family RUL selection. It preserves the recovery guards. The short validation
+pilot supports the FD002 imputation direction; full retraining is still required,
+especially to assess FD004 RUL. See [the evidence and fresh-run command](docs/RECOVERY_BALANCE.md).
+
 ## Environment and notebook
 
 ```bash
@@ -64,7 +73,10 @@ The default `QUICK_RUN = False` trains the finalized dimensions on FD001–FD004
 with five seeds and three engine-disjoint correction folds, preceded by validation-only
 tuning. Separate comparison models, extended robustness/ablation reports, and notebook
 SHAP/LIME plots are skipped by default. It explicitly requests
-CUDA and stops if no CUDA GPU is accessible. Full training has a substantial compute
+CUDA and stops if no CUDA GPU is accessible. `USE_RECOVERY_BALANCE_RECIPE = True`
+loads the targeted recipe in the notebook. CLI runs opt in using
+`--config configs/v8_recovery_balance.json`; omitting that option retains the earlier
+training policy. Full training has a substantial compute
 cost. Set `QUICK_RUN = True` only for a small FD001 execution check; select
 `CONFIG['device'] = 'cpu'` explicitly if that check should use CPU.
 Core training schedules up to 104 upstream
@@ -75,7 +87,7 @@ also tries stride 5. Official test predictions use the last observed endpoint pe
 The same workflow is available without a notebook:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --output-dir artifacts/research_v8
+.venv/bin/python scripts/train_research.py --device cuda --config configs/v8_recovery_balance.json --output-dir artifacts/research_v8_balance
 ```
 
 For a small CPU check including tuning and trained comparisons:
@@ -88,7 +100,7 @@ The default command still includes many temporary fold models. To also run the
 separate comparisons and extended evaluation reports, use:
 
 ```bash
-.venv/bin/python scripts/train_research.py --device cuda --paper-study --output-dir artifacts/research_v8_paper_study
+.venv/bin/python scripts/train_research.py --device cuda --config configs/v8_recovery_balance.json --paper-study --output-dir artifacts/research_v8_balance_paper_study
 ```
 
 In the notebook, set `RUN_PAPER_STUDY = True` before training to enable both reports.
@@ -154,8 +166,10 @@ regimes change. Independent mechanism streams preserve corrupted prefixes when
 unseen future observations are appended. Block faults recur with gaps up to
 `block_gap_cycles` (50). Fault reports include affected-endpoint
 and damaged-entry fractions plus separate active-fault metrics. Validation uses fixed
-mixed faults independently of the training clean fraction and selects on clean/active
-fault RMSE. Clean-reference supervision, a ten-epoch curriculum, and a 1% clean RMSE
+fault contexts independently of the training clean fraction. The recovery-balance
+recipe selects clean pretraining by clean RMSE, then averages clean and equal-family
+active-fault RMSE; the legacy policy uses mixed faults. Clean-reference supervision,
+a ten-epoch curriculum, and a 1% clean RMSE
 guard protect the predictor. Use a fresh directory: v2/v3 checkpoints cannot resume v4.
 The observation rows in C-MAPSS represent consecutive cycles.
 

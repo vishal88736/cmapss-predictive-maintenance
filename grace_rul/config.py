@@ -26,6 +26,11 @@ DEFAULT_CONFIG = {
     "identity_loss_space": "original_linear", "detach_repair_gate": True,
     "recovery_safety": "fitted_support", "identity_tail_fraction": 0.1,
     "identity_tail_loss_weight": 0.5,
+    # Neutral values preserve the earlier format-8 training recipe. The targeted
+    # recovery-balance experiment opts in through configs/v8_recovery_balance.json.
+    "identity_tail_penalty": "mse", "imputation_loss_weight": 0.0,
+    "recovery_sampling": "random", "recovery_train_severities": [0.1, 0.2, 0.3],
+    "clean_pretraining_selection": "mixed_score", "rul_selection": "mixed",
     "recovery_validation": True,
     "recovery_validation_severities": [0.1, 0.2, 0.3, 0.4, 0.5],
     "recovery_validation_max_channel_intact_rmse": None,
