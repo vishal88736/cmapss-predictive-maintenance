@@ -1,0 +1,4 @@
+{
+  "recovery_validation_max_channel_intact_rmse": 0.15,
+  "recovery_validation_max_window_intact_rmse": 0.15
+}

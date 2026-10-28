@@ -5,6 +5,7 @@ signals, and predict remaining useful life. The notebook and website share one
 PyTorch implementation in `grace_rul/`.
 
 - [Current format-8 healthy-sensor protection](docs/RECOVERY_V8.md)
+- [Run the remaining evaluation, training and paper studies](docs/RUN_REMAINING_STUDIES.md)
 - [Earlier format-7 repair](docs/RECOVERY_V7.md)
 - [Target-specific interval calibration](docs/CALIBRATION_PROTOCOL.md)
 - [Earlier format-6 repair](docs/RECOVERY_V6.md)

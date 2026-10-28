@@ -271,12 +271,13 @@ def critic_update(critic, optimizer, result, batch, config):
 
 
 @torch.no_grad()
-def evaluate(model, dataset, config, fault_thresholds=None, **forward_options):
+def evaluate(model, dataset, config, fault_thresholds=None, *, capture_recovery_tails=False, **forward_options):
     model.eval()
     prediction, target, scores, labels, records = [], [], [], [], []
     rec_squared, rec_count, intact_squared, intact_count = 0., 0, 0., 0
     rec_absolute, intact_absolute, tp, fp, fn, tn = 0., 0., 0, 0, 0, 0
     linear_rec, linear_input, linear_intact = 0., 0., 0.
+    channel_squared, channel_counts, window_rmse, window_intact_counts = np.zeros(21), np.zeros(21), [], []
     representation, compression_scale = transform_spec(getattr(dataset, "fault_profile", None))
     for batch in loader(dataset, config):
         batch = move_batch(batch, next(model.parameters()).device)
@@ -299,6 +300,14 @@ def evaluate(model, dataset, config, fault_thresholds=None, **forward_options):
         linear_rec += float(linear_error.masked_fill(~changed, 0).square().sum())
         linear_input += float(input_error.masked_fill(~changed, 0).square().sum())
         linear_intact += float(linear_error.masked_fill(~intact, 0).square().sum())
+        if capture_recovery_tails:
+            healthy_squared = linear_error.masked_fill(~intact, 0).square()
+            channel_squared += healthy_squared.sum((0, 1)).cpu().numpy()
+            channel_counts += intact.sum((0, 1)).cpu().numpy()
+            counts_per_window = intact.sum((1, 2))
+            per_window = (healthy_squared.sum((1, 2)) / counts_per_window.clamp_min(1)).sqrt()
+            window_rmse.extend(per_window.masked_fill(counts_per_window == 0, float("nan")).cpu().tolist())
+            window_intact_counts.extend(counts_per_window.cpu().tolist())
         finite = result["mask"].bool() & batch["valid"].unsqueeze(-1)
         thresholds = result["fault_scores"].new_tensor(fault_thresholds if fault_thresholds is not None else [.5] * 21)
         flags = result["fault_scores"] >= thresholds
@@ -330,6 +339,18 @@ def evaluate(model, dataset, config, fault_thresholds=None, **forward_options):
               "fault_threshold_scope": "validation-selected" if fault_thresholds is not None else "default 0.5",
               "fault_PR_AUC": float(average_precision_score(labels, scores)) if any(labels) and not all(labels) else None}
     records = pd.DataFrame(records)
+    if capture_recovery_tails:
+        records["linear_intact_repair_RMSE"] = window_rmse
+        records["intact_sensor_entries"] = window_intact_counts
+        supported = np.asarray(window_rmse)[np.asarray(window_intact_counts) > 0]
+        channels = channel_counts > 0
+        report.update({
+            "linear_intact_channel_RMSE_max": float(np.sqrt(channel_squared[channels] / channel_counts[channels]).max()) if channels.any() else None,
+            "linear_intact_window_N": len(supported),
+            "linear_intact_window_RMSE_p95": float(np.quantile(supported, .95)) if len(supported) else None,
+            "linear_intact_window_RMSE_p99": float(np.quantile(supported, .99)) if len(supported) else None,
+            "linear_intact_window_RMSE_max": float(supported.max()) if len(supported) else None,
+        })
     report.update(exposure_metrics(records))
     return report, records
 
