@@ -10,6 +10,14 @@ its weaker weights and checkpoints were removed. Continue with the revised step 
 repeating evaluation does not repair the model. See
 [the FD002/FD004 investigation](RECOVERY_BALANCE.md).
 
+Before the expensive step 3, use the
+[short FD002 preflight](RECOVERY_BALANCE.md#short-development-pilot-and-its-limits).
+It audits all 41 sensor conditions after 40 generator fitting steps per objective,
+without training OOF models, recalibrating or reading official tests. The completed
+preflight passed the guards but did not improve RUL over the retained starting
+model, so investigate that development-validation regression before launching the
+full study. A guard pass alone is not a reason to claim improved accuracy.
+
 ## 1. Activate the existing minor environment
 
 ```bash

@@ -106,17 +106,45 @@ Individual faults can still worsen. These are development-validation measurement
 from short generator fine-tuning, not new official test results, full-run acceptance
 or evidence of superiority to the papers.
 
-The pilot's source weights have since been retired at the user's request; its
-saved evidence remains available. To repeat the diagnostic after a future complete
-training run, replace `completed_training_run` below with that actual run directory:
+The earlier pilot's source weights have since been retired at the user's request;
+its saved evidence remains available. A preflight can instead start from the
+retained frozen bundle, which needs no training checkpoint. `--full-matrix` checks
+all 41 sensor contexts without an early exit and retains the original clean
+RMSE/NASA references from its saved upgrade report. `--retain-corrector` evaluates
+RUL with the existing fixed corrector; it never refits that module. Sensor audits
+always exclude correction. Only the generator receives fitting updates.
+
+This is a short check before committing to full retraining:
 
 ```bash
 source minor/bin/activate
 python -u scripts/check_recovery_balance.py \
-  --source-run artifacts/completed_training_run \
-  --steps 40 --device cpu \
-  --output-dir "artifacts/recovery_balance_pilot_$(date -u +%Y%m%d_%H%M%S)"
+  --source-run artifacts/recovery_v8_safety_20261027 \
+  --subsets FD002 --steps 40 --device cpu \
+  --full-matrix --retain-corrector \
+  --output-dir "artifacts/fd002_preflight_$(date -u +%Y%m%d_%H%M%S)"
 ```
+
+The preflight fills missing training-only options from declared defaults, since a
+frozen upgrade retains the older weight-training configuration. The report logs
+the effective tail weight/fraction, fitting scope, original clean references,
+all per-case measurements, frozen-module preservation and complete matrix audits.
+Absent original clean references prevent a clean-guard pass. It compares the new
+objective both to the original retained state and to a paired old-objective
+fine-tune using the same fitting batches. It saves no deployable model.
+
+The completed FD002 preflight is
+`artifacts/fd002_preflight_complete_recipe_20261029/`. Each variant used 40 fitting
+steps at batch size 16, full model dimensions, and all 52 held validation engines
+with three fixed observed prefixes. It did not open official test data or use the
+21 calibration engines. The revised candidate passed all 41 sensor conditions
+and the original clean RMSE/NASA guards. Its eight-family active-fault RMSE was
+12.965, versus 13.083 for the paired old objective and 12.781 before fine-tuning.
+Thus it improved over the short old-objective update but did not beat the retained
+starting model. This is not a demonstrated accuracy gain. Keep the retained bundle
+and investigate that validation regression before the expensive training study.
+A fine-tune of an existing working model cannot prove that fresh main/OOF training
+will select recovery or achieve better accuracy.
 
 ## Next full run
 

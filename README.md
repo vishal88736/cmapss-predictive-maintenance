@@ -55,6 +55,14 @@ equal-family RUL selection. It preserves the recovery guards. The short validati
 pilot supports the FD002 imputation direction; full retraining is still required,
 especially to assess FD004 RUL. See [the evidence and fresh-run command](docs/RECOVERY_BALANCE.md).
 
+A shorter FD002 preflight is available before that expense: run
+`scripts/check_recovery_balance.py` with the retained source bundle,
+`--subsets FD002 --steps 40 --full-matrix --retain-corrector`.
+It checks all 41 recovery contexts and original clean RUL/NASA guards using only
+fitting/validation engines. The completed preflight passed those guards, but its
+RUL error remained above the retained starting model. See
+[the measurements and repeat command](docs/RECOVERY_BALANCE.md#short-development-pilot-and-its-limits).
+
 ## Environment and notebook
 
 ```bash
