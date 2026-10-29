@@ -547,6 +547,13 @@ Noise has temporal memory and a common component within related sensor groups.
 Recovery candidates must pass the declared matrix and clean RMSE/NASA guards,
 both pooled and within every source. These source tags are validation bookkeeping;
 inference always uses the same shared model without an FD label.
+Recipe revision 2 adds original-linear finite-repair regret and supervised pairs
+of real fitting prefixes. The earlier prefix is at most 30 observed rows back;
+its reference and RUL label are training supervision only. The paired loss learns
+both healthy plateaus and genuine RUL decline, without smoothing inference outputs.
+Generator warm starts use the best worst-source validation sensor score over
+mixed faults and mild noise; a rejected final epoch does not overwrite that state.
+The full source/context matrix still controls whether learned repair is exported.
 Rejected recovery can retain a validated bypass. This is an experimental pooled
 recipe; neither a configured guard nor passing tests proves improved accuracy.
 
@@ -571,15 +578,18 @@ code("""
 results = pd.read_csv(RUN_DIR / 'test_metrics.csv')
 display(results[['partition', 'subset', 'protocol', 'engines', 'N', 'RMSE', 'engine_balanced_RMSE', 'MAE', 'NASA_Score', 'Interval_Coverage']])
 history = pd.read_csv(RUN_DIR / 'training_history.csv')
-fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+fig, axes = plt.subplots(1, 3, figsize=(16, 4))
 for stage, group in history.groupby('stage', sort=False):
     axes[0].plot(group.epoch, group.validation_macro_RMSE, marker='.', label=stage)
 axes[0].set(xlabel='Epoch within stage', ylabel='Validation RUL RMSE (cycles)')
 axes[0].legend()
 primary = results[(results.partition == 'internal_test_10pct') & (results.protocol == f"capped_{CONFIG['train_rul_cap']:g}")]
-axes[1].bar(primary.subset, primary.RMSE)
-axes[1].set(ylabel='Internal holdout RMSE (cycles)', title='Shared weights across every source')
-plt.tight_layout(); plt.show()
+generator_history = history[history.stage == 'generator'].dropna(subset=['warm_sensor_score'])
+axes[1].plot(generator_history.epoch, generator_history.warm_sensor_score, marker='.')
+axes[1].set(xlabel='Generator epoch', ylabel='Worst-source sensor score', title='Warm-start selection (lower is better)')
+axes[2].bar(primary.subset, primary.RMSE)
+axes[2].set(ylabel='Internal holdout RMSE (cycles)', title='Shared weights across every source')
+plt.tight_layout(); fig.savefig(RUN_DIR / 'training_curves.png', dpi=150); plt.show()
 """)
 md("""
 ## Reload and optional explanations

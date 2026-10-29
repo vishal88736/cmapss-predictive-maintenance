@@ -111,7 +111,7 @@ def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluato
     # Do not inherit quick-run sampling limits: they would omit prefixes or
     # entire engines and invalidate the declared simultaneous score.
     evaluation_config = {**config, "maximum_windows": None, "window_stride": 1,
-                         "maximum_batches": None}
+                         "maximum_batches": None, "prefix_consistency_loss_weight": 0.}
     dataset = WindowDataset(frame.sort_values(["unit", "cycle"]), scaler, evaluation_config,
                             mode="train" if policy == "engine_prefix_max" else "calibration",
                             seed=seed, family="clean")

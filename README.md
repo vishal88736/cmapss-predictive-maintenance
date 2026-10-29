@@ -29,11 +29,14 @@ fitting-only preprocessor**. FD labels are optional at inference. Whole engines
 are split into 567 training, 71 validation-pool and 71 internal-test engines.
 The validation pool contains 36 selection and 35 independent calibration engines.
 Original official tests remain a separate benchmark, evaluated after model freeze.
+The current revision-2 recipe adds physical finite-repair regret, paired-prefix
+RUL supervision and a validation-selected generator warm start. Existing models
+remain loadable; use a fresh directory for the changed training recipe.
 
 ```bash
 source minor/bin/activate
 set -o pipefail
-pooled_run_dir="artifacts/pooled_v9_$(date -u +%Y%m%d_%H%M%S)"
+pooled_run_dir="artifacts/pooled_v9_r2_$(date -u +%Y%m%d_%H%M%S)"
 python -u scripts/train_pooled.py --device cuda \
   --output-dir "$pooled_run_dir" \
   2>&1 | tee "${pooled_run_dir}.log"
@@ -41,8 +44,9 @@ python -u scripts/train_pooled.py --device cuda \
 
 Use `GRACE_RUL_pooled.ipynb` for the same workflow in Jupyter. A small CPU execution
 check uses `python scripts/train_pooled.py --quick --device cpu --skip-official`.
-Quick metrics are not accuracy evidence. The shared full model still needs training
-and an audit before claiming improvement or replacing measured paper results.
+Quick metrics are not accuracy evidence. Revision 2 needs full training and an
+audit before claiming improvement or replacing measured paper results. The first
+completed shared run and the earlier format-8 model remain retained locally.
 See [the complete protocol, outputs and resume instructions](docs/POOLED_V9.md).
 
 ## Retained format-8 model and earlier recovery checks
@@ -64,7 +68,7 @@ It supports FD002/FD004; its full frozen evaluation is saved in
 `artifacts/v8_eval_20261028_180741/`. Superseded model weights, checkpoints and old
 execution-check bundles were removed at the user's request. Their unmodified
 result/review records remain under ignored `artifacts/retired_evidence/`, including
-the failed runs. This leaves one usable trained run for automatic website discovery.
+the failed runs. Completed full pooled bundles can also be discovered automatically.
 Legacy FD001/FD003 weights were retired with the old format-5 run; their data and
 historical measurements remain available for fresh training.
 

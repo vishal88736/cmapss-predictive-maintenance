@@ -1,5 +1,10 @@
 {
   "training_scope": "pooled",
+  "pooled_protocol_revision": 2,
+  "finite_recovery_loss_weight": 1.0,
+  "prefix_consistency_loss_weight": 1.0,
+  "prefix_pair_max_lag": 30,
+  "generator_selection": "sensor_skill",
   "operating_regimes": "auto",
   "evaluation_prefix_policy": "fixed_grid",
   "evaluation_start_cycle": 30,

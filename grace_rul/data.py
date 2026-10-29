@@ -265,10 +265,21 @@ class WindowDataset(Dataset):
         damaged, _ = make_window(corrupt, end, length)
         labels, _ = make_window(altered.astype(np.float32), end, length)
         raw_target = float(engine["targets"][end])
-        return {"x": torch.from_numpy(damaged), "reference": torch.from_numpy(reference),
+        sample = {"x": torch.from_numpy(damaged), "reference": torch.from_numpy(reference),
                 "valid": torch.from_numpy(valid), "altered": torch.from_numpy(labels).bool(),
                 "target": torch.tensor(min(self.config["train_rul_cap"], raw_target), dtype=torch.float32),
                 "raw_target": torch.tensor(raw_target, dtype=torch.float32), "unit": engine["unit"], "cycle": int(engine["cycles"][end])}
+        if self.mode == "train" and self.config.get("prefix_consistency_loss_weight", 0.) > 0:
+            # Choose only an earlier observed prefix. The lag depends on the
+            # seed/epoch/current endpoint, never RUL, source or future rows.
+            rng = np.random.default_rng(np.random.SeedSequence([self.seed, self.epoch, engine["unit"], end, 617]))
+            lag = int(rng.integers(1, min(end, self.config.get("prefix_pair_max_lag", 30)) + 1)) if end else 0
+            previous_end = end - lag
+            previous, previous_valid = make_window(engine["values"], previous_end, length)
+            sample.update(previous_reference=torch.from_numpy(previous), previous_valid=torch.from_numpy(previous_valid),
+                previous_target=torch.tensor(min(self.config["train_rul_cap"], float(engine["targets"][previous_end])), dtype=torch.float32),
+                pair_valid=torch.tensor(lag > 0), previous_cycle=int(engine["cycles"][previous_end]))
+        return sample
 
 
 def select_background_indices(dataset, size, seed):

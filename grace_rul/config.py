@@ -25,6 +25,8 @@ DEFAULT_CONFIG = {
     "pooled_validation_fraction": .10, "pooled_calibration_share_of_validation": .50,
     "pooled_maximum_engines_per_source": None, "pooled_evaluate_official": True,
     "pooled_protocol_revision": 1,
+    "finite_recovery_loss_weight": 0., "prefix_consistency_loss_weight": 0.,
+    "prefix_pair_max_lag": 30, "generator_selection": "rul",
     "device": "cuda", "validation_fraction": 0.20,
     "calibration_fraction_of_training": 0.10,
     "subsets": SUBSETS, "sequence_length": 70, "local_length": 30,

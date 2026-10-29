@@ -12,6 +12,42 @@ finite-repair thresholds, fitting-support bounds and full recovery matrix.
 The generator has structured fault supervision; healthy examples remain present.
 The new loss recipe is experimental and does not guarantee better RUL accuracy.
 
+## Training recipe revision 2
+
+The first full pooled run selected repair bypass. Its audited failures include
+mild-noise reconstruction regressions and a large FD004 prefix underprediction.
+Revision 2 changes fitting objectives and generator initialization; the neural
+architecture, 24 measured features and inference equations remain compatible.
+
+- **Finite-fault regret:** for each altered finite window/channel, compare the
+  proposed repair MSE against the unchanged-input MSE in the original, uncompressed
+  normalized sensor space. For ratio `r`, train with `log(1+r) + max(log(r), 0)`.
+  Only a machine-precision floor handles a zero baseline. This gives mild faults
+  meaningful weight alongside large faults and directly penalizes harmful moves.
+  The loss uses the gated proposal before projection so a saturated bound cannot
+  hide its gradient. Actual deployed repairs still face the original full matrix.
+- **Paired clean prefixes:** each fitting window receives an earlier prefix of
+  the same engine, with an observed lag from 1 to 30 rows. Supervise the earlier
+  prediction and the change between the two predictions using their actual capped
+  labels. A healthy plateau and a declining late-life target are both supported.
+  Dropout is disabled for these paired passes, while predictor gradients remain
+  active. Pairs never supply future measurements, source IDs or RUL to inference.
+  Calibration does not construct training pairs.
+- **Sensor-based generator warm start:** generator-stage early stopping and the
+  initialization carried into joint fitting use the best validation sensor score,
+  rather than the last rejected generator epoch. The score combines finite-fault
+  regret, missing imputation and healthy displacement over mixed faults and the
+  lowest declared training noise severity. Pooled selection minimizes the worst
+  source's average of these contexts. Warm state and score survive interruption.
+  This does not authorize exporting a failed sensor-recovery candidate.
+
+All three additions use fitting labels or held-validation measurements. The 80/10/10
+engine identities, calibration exclusion, correlated corruption and repair/RUL/NASA
+guard budgets remain the same. Paired predictor passes add training compute; they
+do not add inference parameters or a prediction-smoothing rule. Reports include
+paired-prefix loss, warm sensor score/selection and validation RUL-step errors.
+The next full run is needed to measure whether these changes improve recovery.
+
 ## Data split and leakage boundaries
 
 Only `train_FD001.txt` through `train_FD004.txt` enter the new split. Original
@@ -49,7 +85,7 @@ not inferred FD/failure-mode labels.
 
 1. Save `pooled_plan.json` and `engine_partitions.csv` before model fitting. The
    plan binds data hashes, configuration, engine namespaces and all partitions.
-2. Train one shared clean predictor, then independently fit the finite-fault
+2. Train one shared clean predictor with paired-prefix supervision, then independently fit the finite-fault
    detector, train recovery with the conditional WGAN-GP critic, and jointly
    optimize recovery/prediction. Corruption uses temporally correlated, related
    sensor-domain mechanisms with fitting-only physical amplitude scales.
@@ -116,7 +152,7 @@ Start the complete full-dimension run in a terminal with a visible CUDA device:
 
 ```bash
 python scripts/check_cuda.py
-pooled_run_dir="artifacts/pooled_v9_$(date -u +%Y%m%d_%H%M%S)"
+pooled_run_dir="artifacts/pooled_v9_r2_$(date -u +%Y%m%d_%H%M%S)"
 python -u scripts/train_pooled.py --device cuda \
   --output-dir "$pooled_run_dir" \
   2>&1 | tee "${pooled_run_dir}.log"
@@ -129,6 +165,9 @@ To omit only the extra official benchmark, add `--skip-official`. That reporting
 switch does not change the training identity. Changing data, seeds, dimensions or
 loss settings requires a fresh directory. Resume an interrupted run by using its
 actual printed directory and unchanged training settings.
+Revision 2 is loaded automatically from `configs/pooled_v9.json`. Do not resume
+the completed revision-1 training directory with this changed recipe. Its saved
+format-9 model remains loadable and its measurements remain historical evidence.
 
 The notebook equivalent is `GRACE_RUL_pooled.ipynb`. Its default is full training
 on CUDA. `QUICK_RUN = True` and `DEVICE = 'cpu'` explicitly select an
@@ -142,7 +181,10 @@ execution check. SHAP/LIME studies remain optional and use fitting-only backgrou
   optimizer/selection/calibration/test exclusions.
 - `checkpoints/`: resumable primary and OOF epochs; no held-test fitting.
 - `training_history.csv`, `correction_history.csv`, `seed_summary.csv`,
-  `cross_validation_metrics.csv`: actual learning/selection records.
+  `cross_validation_metrics.csv`: actual learning/selection records. Generator
+  history distinguishes `warm_sensor_score` / `warm_recovery_selected` from
+  deployment checkpoint acceptance. RUL-step columns measure residual changes
+  between observed validation prefixes; they do not modify model predictions.
 - `detector_history_POOLED_<seed>.csv`, `detector_audit_POOLED_<seed>.json`,
   `recovery_validation_POOLED_<seed>.json`: measured detector fitting and selected/
   rejected sensor-recovery audits, including source-level checks when reached.

@@ -50,7 +50,7 @@ def validate_pooled_config(config):
     validate_training_config(config)
     if (config.get("training_scope") != "pooled" or config.get("operating_regimes") != "auto" or
             config.get("evaluation_prefix_policy") != "fixed_grid" or set(config["subsets"]) != set(SUBSETS) or
-            config.get("pooled_protocol_revision") != 1):
+            config.get("pooled_protocol_revision") not in {1, 2}):
         raise ValueError("Pooled runs require all four sources, automatic fitting-only regimes and a fixed prefix grid.")
     if config.get("subset_overrides") or config["tune_before_training"] or config["run_matched_benchmarks"]:
         raise ValueError("The shared protocol has no per-FD overrides or per-FD tuning/comparator driver.")
@@ -249,6 +249,10 @@ def run_pooled_experiment(project_root, config=None, output_dir=None):
     fit, val, cal = [frame[frame.unit.isin(groups[key])].copy() for key in ["fit", "validation", "calibration"]]
     manifest = {"format_version": POOLED_FORMAT_VERSION, "architecture": POOLED_ARCHITECTURE,
         "training_scope": "pooled", "requires_subset_label": False, "quick_run": config["quick_run"],
+        "training_recipe_revision": config["pooled_protocol_revision"],
+        "generator_selection": config.get("generator_selection", "rul"),
+        "finite_recovery_loss_weight": config.get("finite_recovery_loss_weight", 0.),
+        "prefix_consistency_loss_weight": config.get("prefix_consistency_loss_weight", 0.),
         "created_at": stamp, "subsets": [MODEL_KEY], "training_sources": list(SUBSETS),
         "corruption_protocol": CORRUPTION_PROTOCOL, "artifact": "grace_rul_ALL.pt", "status": "training",
         "training_device": str(device), "torch_version": str(torch.__version__),

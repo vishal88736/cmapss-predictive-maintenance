@@ -69,6 +69,17 @@ def metrics(prediction, truth):
             "R2": float(1 - (error ** 2).sum() / variance) if variance > 0 else None}
 
 
+def trajectory_metrics(records):
+    """Measure changes in prefix residuals without using them to alter outputs."""
+    ordered = records.sort_values(["unit", "cycle"])
+    residual = ordered.prediction - ordered.target
+    changes = residual.groupby(ordered.unit).diff().dropna().to_numpy()
+    return {"RUL_step_pairs": len(changes),
+            "RUL_step_RMSE": float(np.sqrt(np.mean(changes ** 2))) if len(changes) else None,
+            "RUL_step_MAE": float(np.mean(np.abs(changes))) if len(changes) else None,
+            "RUL_step_max_error": float(np.max(np.abs(changes))) if len(changes) else None}
+
+
 def masked_mse(error, mask):
     return (error.square() * mask).sum() / mask.sum().clamp_min(1)
 
@@ -143,6 +154,26 @@ def missing_imputation_loss(repaired, reference, missing, config):
     denominator = torch.logaddexp(base, base.new_full(base.shape, 2 * math.log(budget)))
     values = torch.where(supported, F.softplus(error - denominator), torch.zeros_like(error))
     return values[counts > 0].mean() if bool((counts > 0).any()) else values.sum() * 0.
+
+
+def finite_recovery_loss(proposal, observed, reference, changed_finite, config):
+    """Train finite repairs against their unchanged-input physical baseline.
+
+    Each window/channel contributes log(1 + repaired MSE / input MSE), plus
+    positive log regret when repair is worse than leaving the sensor alone.
+    Both MSEs use the original, uncompressed normalized sensor space. Only a
+    numerical epsilon stabilizes an exactly zero input error. Training fault
+    labels define the mask; none of these references is available to inference.
+    """
+    error, counts, supported = _log_linear_group_mse(proposal, reference, changed_finite, config)
+    base, _, base_supported = _log_linear_group_mse(observed, reference, changed_finite, config)
+    base = base.masked_fill(~base_supported, -torch.inf)
+    floor = 2 * math.log(torch.finfo(reference.dtype).eps)
+    denominator = torch.logaddexp(base, base.new_full(base.shape, floor))
+    log_ratio = error - denominator
+    values = torch.where(supported, F.softplus(log_ratio) + log_ratio.clamp_min(0), torch.zeros_like(error))
+    groups = values[counts > 0]
+    return groups.mean() if groups.numel() else values.sum() * 0.
 
 
 def intact_tail_identity_loss(repaired, reference, intact, config):
@@ -224,6 +255,43 @@ def branch_objective(model, result, target):
     return sum(F.mse_loss(result[name] / scale, target / scale) for name in names) / len(names)
 
 
+def prefix_consistency_loss(model, batch, current_prediction=None):
+    """Supervise changes between two real prefixes of the same fitting engine.
+
+    The earlier prefix is anchored to its own capped RUL label; the difference
+    uses the actual label change, including the healthy plateau. No monotonic
+    clipping, true RUL, engine ID or future sensor reading enters inference.
+    Deterministic predictor passes keep independent dropout from manufacturing
+    apparent trajectory changes. Recurrent modules need cuDNN training mode for
+    input gradients; their internal dropout is zero.
+    """
+    if model.config.get("prefix_consistency_loss_weight", 0.) <= 0:
+        return next(model.parameters()).sum() * 0.
+    required = {"previous_reference", "previous_valid", "previous_target", "pair_valid"}
+    if not required.issubset(batch):
+        raise ValueError("Prefix consistency requires paired fitting-engine prefixes.")
+    supported = batch["pair_valid"].bool()
+    if not bool(supported.any()):
+        return next(model.parameters()).sum() * 0.
+    with evaluation_mode(model):
+        for module in model.predictor.modules():
+            if isinstance(module, torch.nn.RNNBase):
+                module.train()
+        if current_prediction is None:
+            inputs = torch.cat([batch["reference"], batch["previous_reference"]])
+            validity = torch.cat([batch["valid"], batch["previous_valid"]])
+            predictions = model(inputs, validity, use_repair=False, use_correction=False)["base"]
+            current_prediction, previous = predictions.chunk(2)
+        else:
+            previous = model(batch["previous_reference"], batch["previous_valid"],
+                use_repair=False, use_correction=False)["base"]
+    scale = model.config["target_scale"]
+    change = (current_prediction[supported] - previous[supported]) / scale
+    target_change = (batch["target"][supported] - batch["previous_target"][supported]) / scale
+    return (F.mse_loss(change, target_change) +
+            F.mse_loss(previous[supported] / scale, batch["previous_target"][supported] / scale))
+
+
 def objectives(model, batch, critic=None, consistency=True):
     result = model(batch["x"], batch["valid"], use_correction=False)
     valid = batch["valid"].unsqueeze(-1)
@@ -241,6 +309,9 @@ def objectives(model, batch, critic=None, consistency=True):
     imputation = (missing_imputation_loss(result["repaired"], batch["reference"][..., 3:],
                     changed & ~result["mask"].bool(), model.config)
                   if model.config.get("imputation_loss_weight", 0.) > 0 else identity * 0.)
+    finite_recovery = (finite_recovery_loss(result["repair_proposal"], result["observed"],
+        batch["reference"][..., 3:], changed & result["mask"].bool(), model.config)
+        if model.config.get("finite_recovery_loss_weight", 0.) > 0 else identity * 0.)
     trend = repair_trend_loss(result["repaired"], batch["reference"][..., 3:], batch["altered"], batch["valid"], model.config)
     available = result["mask"].bool() & valid
     detection = finite_fault_loss(result["logits"], batch["altered"], available, model.config)
@@ -248,7 +319,8 @@ def objectives(model, batch, critic=None, consistency=True):
     rul = F.mse_loss(result["base"] / scale, batch["target"] / scale)
     branch = branch_objective(model, result, batch["target"])
     cons = clean_rul = bypass_rul = result["base"].sum() * 0
-    clean_grad = model.config.get("clean_rul_loss_weight", 0.) > 0 and any(p.requires_grad for p in model.predictor.parameters())
+    clean_grad = (model.config.get("clean_rul_loss_weight", 0.) > 0 or
+                  model.config.get("prefix_consistency_loss_weight", 0.) > 0) and any(p.requires_grad for p in model.predictor.parameters())
     if consistency or clean_grad:
         with torch.set_grad_enabled(torch.is_grad_enabled() and clean_grad), evaluation_mode(model):
             if clean_grad:
@@ -260,6 +332,8 @@ def objectives(model, batch, critic=None, consistency=True):
             teacher = model(batch["reference"], batch["valid"], use_repair=False, use_correction=False)["base"]
         if clean_grad:
             clean_rul = F.mse_loss(teacher / scale, batch["target"] / scale)
+    prefix_consistency = (prefix_consistency_loss(model, batch, teacher) if clean_grad and
+        model.config.get("prefix_consistency_loss_weight", 0.) > 0 else result["base"].sum() * 0.)
     if consistency:
         available_fraction = result["mask"].sum((1, 2)) / (21 * batch["valid"].sum(1)).clamp_min(1)
         change = (torch.nan_to_num(batch["x"][..., 3:]) - batch["reference"][..., 3:]).abs()
@@ -273,11 +347,12 @@ def objectives(model, batch, critic=None, consistency=True):
                       model.config["branch_loss_weight"] * branch_objective(model, bypass, batch["target"]))
     adv = result["base"].sum() * 0 if critic is None else -critic(result["repaired"], batch["reference"][..., :3], batch["valid"]).mean()
     terms = {"rul": rul, "reconstruction": rec, "generator_reconstruction": generator_rec,
-             "identity": identity, "identity_tail": identity_tail, "imputation": imputation, "detection": detection, "trend": trend,
+             "identity": identity, "identity_tail": identity_tail, "imputation": imputation,
+             "finite_recovery": finite_recovery, "prefix_consistency": prefix_consistency, "detection": detection, "trend": trend,
              "adversarial": adv, "consistency": cons, "branch": branch, "clean_rul": clean_rul,
              "bypass_rul": bypass_rul}
     if not model.config["train_repair"]:
-        for name in ["reconstruction", "generator_reconstruction", "identity", "identity_tail", "imputation", "detection", "trend", "adversarial"]:
+        for name in ["reconstruction", "generator_reconstruction", "identity", "identity_tail", "imputation", "finite_recovery", "detection", "trend", "adversarial"]:
             terms[name] = rul * 0
     loss = sum(model.config.get(f"{name}_loss_weight", 0.) * value for name, value in terms.items())
     return loss, {**result, "loss_terms": {name: value.detach() for name, value in terms.items()}}
@@ -335,6 +410,7 @@ def evaluate(model, dataset, config, fault_thresholds=None, *, capture_recovery_
     rec_squared, rec_count, intact_squared, intact_count = 0., 0, 0., 0
     rec_absolute, intact_absolute, tp, fp, fn, tn = 0., 0., 0, 0, 0, 0
     linear_rec, linear_input, linear_intact = 0., 0., 0.
+    finite_skill, missing_skill, finite_groups, missing_groups = 0., 0., 0, 0
     channel_squared, channel_counts, window_rmse, window_intact_counts = np.zeros(21), np.zeros(21), [], []
     representation, compression_scale = transform_spec(getattr(dataset, "fault_profile", None))
     for batch in loader(dataset, config):
@@ -367,6 +443,14 @@ def evaluate(model, dataset, config, fault_thresholds=None, *, capture_recovery_
             window_rmse.extend(per_window.masked_fill(counts_per_window == 0, float("nan")).cpu().tolist())
             window_intact_counts.extend(counts_per_window.cpu().tolist())
         finite = result["mask"].bool() & batch["valid"].unsqueeze(-1)
+        if config.get("generator_selection") == "sensor_skill":
+            changed_finite, missing = changed & finite, changed & ~finite
+            nf, nm = int(changed_finite.any(1).sum()), int(missing.any(1).sum())
+            finite_skill += nf * float(finite_recovery_loss(result["repaired"], result["observed"],
+                batch["reference"][..., 3:], changed_finite, config))
+            missing_skill += nm * float(missing_imputation_loss(result["repaired"],
+                batch["reference"][..., 3:], missing, config))
+            finite_groups += nf; missing_groups += nm
         thresholds = result["fault_scores"].new_tensor(fault_thresholds if fault_thresholds is not None else [.5] * 21)
         flags = result["fault_scores"] >= thresholds
         if model.config.get("finite_repair_gate") == "validated_threshold":
@@ -410,6 +494,11 @@ def evaluate(model, dataset, config, fault_thresholds=None, *, capture_recovery_
             "linear_intact_window_RMSE_max": float(supported.max()) if len(supported) else None,
         })
     report.update(exposure_metrics(records))
+    if config.get("generator_selection") == "sensor_skill":
+        report.update(finite_recovery_relative_loss=finite_skill / max(1, finite_groups),
+                      missing_imputation_relative_loss=missing_skill / max(1, missing_groups))
+    if config.get("prefix_consistency_loss_weight", 0.) > 0:
+        report.update(trajectory_metrics(records))
     if config.get("training_scope") == "pooled" and getattr(dataset, "source_by_unit", None):
         sources = records.unit.map(dataset.source_by_unit)
         report["source_metrics"] = {str(source): {**metrics(rows.prediction, rows.target), **exposure_metrics(rows)}
@@ -468,6 +557,39 @@ def validation_score(model, clean_dataset, corrupt_dataset, config, *, selection
     return score, clean, damaged
 
 
+def recovery_warm_score(model, mixed_dataset, mild_noise_dataset, config, *, mixed_report=None):
+    """Select generator initialization on held-validation sensor skill only.
+
+    Mixed faults cover imputation; the lowest declared training noise level
+    separately exposes repairs that worsen small finite errors. Pooled runs
+    minimize the worst source's mean of these two sensor scores. Source tags
+    partition validation reports only. This chooses a warm start for joint
+    fitting, not permission to deploy rejected recovery. The unchanged full
+    source/context matrix still controls export.
+    """
+    budget = max(float(config["max_intact_repair_rmse"]), 1e-8)
+    sources = sorted(set(getattr(mixed_dataset, "source_by_unit", {}).values()))
+    scores = []
+    for source in sources if len(sources) > 1 else [None]:
+        reports = []
+        for dataset, supplied in [(mixed_dataset, mixed_report), (mild_noise_dataset, None)]:
+            if source is not None:
+                view = copy.copy(dataset)
+                view.samples = [(i, end) for i, end in dataset.samples
+                                if dataset.source_by_unit[dataset.engines[i]["unit"]] == source]
+                supplied = None
+            else:
+                view = dataset
+            reports.append(supplied or evaluate(model, view, config,
+                use_repair=True, use_correction=False)[0])
+        scores.append(float(np.mean([r["finite_recovery_relative_loss"] + r["missing_imputation_relative_loss"] +
+            (r["linear_intact_repair_RMSE"] / budget) ** 2 for r in reports])))
+    score = max(scores)
+    if not np.isfinite(score):
+        raise FloatingPointError("Non-finite held-validation generator sensor score.")
+    return score
+
+
 def validate_training_config(config):
     transform_spec(config)
     if config.get("training_scope", "per_subset") not in {"per_subset", "pooled"}:
@@ -485,10 +607,14 @@ def validate_training_config(config):
             ("identity_tail_penalty", {"mse", "log_mse"}, "mse"),
             ("recovery_sampling", {"random", "balanced"}, "random"),
             ("clean_pretraining_selection", {"mixed_score", "clean_rmse"}, "mixed_score"),
+            ("generator_selection", {"rul", "sensor_skill"}, "rul"),
             ("rul_selection", {"mixed", "fault_macro"}, "mixed")]:
         value = config.get(name, default)
         if not isinstance(value, str) or value not in choices:
             raise ValueError(f"Unsupported {name}.")
+    lag = config.get("prefix_pair_max_lag", 30)
+    if isinstance(lag, bool) or not isinstance(lag, int) or lag < 1:
+        raise ValueError("prefix_pair_max_lag must be a positive integer.")
     levels = config.get("recovery_train_severities", [.1, .2, .3])
     if (not isinstance(levels, (list, tuple)) or not levels or
             any(isinstance(x, bool) or not isinstance(x, (int, float)) or not np.isfinite(x) or not 0 < x <= .5 for x in levels) or
@@ -658,6 +784,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
     selection_options = {"selection_datasets": selection_contexts} if selection_contexts is not None else {}
     history, best_score, clean_reference = [], float("inf"), float("inf")
     warm_recovery, detector_audit, detector_history = None, None, []
+    warm_recovery_score = float("inf")
     selected_recovery_audit, recovery_audits, recovery_matrix = None, [], None
     clean_nasa_reference = float("inf")
     clean_source_reference = {}
@@ -669,6 +796,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
         clean_nasa_reference = checkpoint.get("clean_nasa_reference", float("inf"))
         clean_source_reference = checkpoint.get("clean_source_reference", {})
         warm_recovery = checkpoint.get("warm_recovery")
+        warm_recovery_score = checkpoint.get("warm_recovery_score", float("inf"))
         detector_audit, detector_history = checkpoint.get("detector_audit"), checkpoint.get("detector_history", [])
         selected_recovery_audit = checkpoint.get("selected_recovery_audit")
         recovery_audits = checkpoint.get("recovery_audits", [])
@@ -735,6 +863,20 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
             best_score, best, stale = checkpoint["best_score"], checkpoint["best"], checkpoint["stale"]
             best_selection_score = checkpoint.get("best_selection_score", best_score)
             start_epoch = checkpoint["next_epoch"]
+        sensor_warm_selection = stage == "generator" and config.get("generator_selection") == "sensor_skill"
+        mild_noise_validation = None
+        if sensor_warm_selection:
+            mild_noise_validation = WindowDataset(validation_frame, scaler, config, mode="validation",
+                seed=config["validation_seed"], family="noise", severity=min(config["recovery_train_severities"]))
+            if warm_recovery is None:
+                previous_repair = bool(model.repair_enabled)
+                model.repair_enabled.fill_(True)
+                try:
+                    warm_recovery_score = recovery_warm_score(model, corrupt_validation, mild_noise_validation, config)
+                    warm_recovery = {name: tensor.detach().clone() for name, tensor in model.state_dict().items()
+                                     if name.startswith(("detector.", "generator."))}
+                finally:
+                    model.repair_enabled.fill_(previous_repair)
         total_epochs = config[f"{stage}_epochs"]
         for epoch in range(start_epoch, total_epochs):
             started = time.perf_counter()
@@ -771,6 +913,10 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                     result = model(batch["reference"], batch["valid"], use_repair=False, use_correction=False)
                     scale = config["target_scale"]
                     loss = config["rul_loss_weight"] * F.mse_loss(result["base"] / scale, batch["target"] / scale) + config["branch_loss_weight"] * branch_objective(model, result, batch["target"])
+                    if config.get("prefix_consistency_loss_weight", 0.) > 0:
+                        paired = prefix_consistency_loss(model, batch)
+                        loss = loss + config["prefix_consistency_loss_weight"] * paired
+                        term_totals["prefix_consistency"] = term_totals.get("prefix_consistency", 0.) + float(paired.detach())
                 else:
                     loss, result = objectives(model, batch, critic if adversarial else None)
                     for name, value in result["loss_terms"].items():
@@ -786,6 +932,14 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
             progress.emit(f"{label}: validating clean and corrupted engines", force=True)
             score, clean, damaged = validation_score(model, clean_validation, corrupt_validation, config,
                                                      use_repair=stage != "predictor", use_correction=False, **selection_options)
+            warm_selected, sensor_score = False, None
+            if sensor_warm_selection:
+                sensor_score = recovery_warm_score(model, corrupt_validation, mild_noise_validation, config, mixed_report=damaged)
+                warm_selected = sensor_score < warm_recovery_score
+                if warm_selected:
+                    warm_recovery_score = sensor_score
+                    warm_recovery = {name: tensor.detach().clone() for name, tensor in model.state_dict().items()
+                                     if name.startswith(("detector.", "generator."))}
             repair_guards = checkpoint_guards(clean, damaged, clean_reference, config, clean_nasa_reference=clean_nasa_reference,
                 clean_source_reference=clean_source_reference)
             accepted = stage == "predictor" or all(repair_guards.values())
@@ -852,6 +1006,9 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                    "checkpoint_accepted": accepted, "learning_rate": optimizer.param_groups[0]["lr"],
                    "checkpoint_selected": checkpoint_selected, "selection_score": selection_score,
                    "selection_policy": "clean_rmse" if clean_anchor else config.get("rul_selection", "mixed"),
+                   "warm_sensor_score": sensor_score, "warm_recovery_selected": warm_selected,
+                   "validation_clean_RUL_step_RMSE": clean.get("RUL_step_RMSE"),
+                   "validation_clean_RUL_step_max_error": clean.get("RUL_step_max_error"),
                    "validation_fault_macro_RMSE": damaged.get("selection_fault_macro_RMSE"),
                    **{f"validation_{family}_selection_RMSE": value for family, value in damaged.get("selection_family_RMSE", {}).items()},
                    "duration_seconds": time.perf_counter() - started,
@@ -860,7 +1017,9 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
             history.append(row)
             progress.emit(f"{stage} {epoch + 1}: loss={row['train_loss']:.4f}, validation RMSE={score:.3f}, elapsed={row['duration_seconds']:.1f}s", force=True)
             if checkpoint_selected:
-                best_score, best, stale = score, copy.deepcopy(model.state_dict()), 0
+                best_score, best = score, copy.deepcopy(model.state_dict())
+                if not sensor_warm_selection:
+                    stale = 0
                 best_selection_score = selection_score
                 if stage != "predictor":
                     selected_recovery_audit = candidate_recovery_audit if selected_repair else None
@@ -870,13 +1029,15 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                     clean_reference = clean["RMSE"]
                     clean_nasa_reference = clean.get("NASA_Score_Mean", float("inf"))
                     clean_source_reference = copy.deepcopy(clean.get("source_metrics", {}))
-            else:
+            elif not sensor_warm_selection:
                 stale += 1
-            scheduler.step(selection_score)
-            critic_scheduler.step(selection_score)
+            if sensor_warm_selection:
+                stale = 0 if warm_selected else stale + 1
+            scheduler.step(sensor_score if sensor_warm_selection else selection_score)
+            critic_scheduler.step(sensor_score if sensor_warm_selection else selection_score)
             stage_complete = stale >= config["patience"] or epoch + 1 == total_epochs
             if stage_complete:
-                if stage == "generator" and not bool(best["repair_enabled"]):
+                if stage == "generator" and not bool(best["repair_enabled"]) and not sensor_warm_selection:
                     warm_recovery = {name: tensor.detach().clone() for name, tensor in model.state_dict().items()
                                      if name.startswith(("detector.", "generator."))}
                 model.load_state_dict(best)
@@ -891,6 +1052,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                     "detector_audit": detector_audit, "detector_history": detector_history,
                     "selected_recovery_audit": selected_recovery_audit, "recovery_audits": recovery_audits,
                     "warm_recovery": warm_recovery,
+                    "warm_recovery_score": warm_recovery_score,
                     "best": best, "best_score": best_score, "best_selection_score": best_selection_score,
                     "stale": stale, "history": history, "random_state": random_state()})
             if stale >= config["patience"]:
