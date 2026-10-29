@@ -1,0 +1,22 @@
+{
+  "training_scope": "pooled",
+  "operating_regimes": "auto",
+  "evaluation_prefix_policy": "fixed_grid",
+  "evaluation_start_cycle": 30,
+  "evaluation_stride": 30,
+  "pooled_validation_fraction": 0.10,
+  "pooled_test_fraction": 0.10,
+  "pooled_calibration_share_of_validation": 0.50,
+  "identity_tail_penalty": "log_mse",
+  "imputation_loss_weight": 1.0,
+  "recovery_sampling": "balanced",
+  "recovery_train_severities": [0.1, 0.2, 0.3],
+  "clean_pretraining_selection": "clean_rmse",
+  "rul_selection": "fault_macro",
+  "recovery_validation_max_channel_intact_rmse": 0.15,
+  "recovery_validation_max_window_intact_rmse": 0.15,
+  "tune_before_training": false,
+  "run_matched_benchmarks": false,
+  "run_extended_evaluation": true,
+  "seeds": [42]
+}

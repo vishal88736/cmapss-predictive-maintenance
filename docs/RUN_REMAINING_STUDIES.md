@@ -1,5 +1,10 @@
 # Run the remaining GRACE-RUL studies
 
+The current implementation direction is the [shared format-9 pipeline](POOLED_V9.md):
+combine all four training sources, use one model without FD routing, and split
+whole engines 80/10/10. Use that document and `GRACE_RUL_pooled.ipynb` for the next
+training run. The stages below retain the earlier format-8 experiment history.
+
 Run these stages in order. Each stage has a distinct purpose. Evaluation and
 explanations do not retrain weights. Fresh format-8 training is needed to measure
 the revised recovery/selection recipe. A passing guard does not force better RUL accuracy.

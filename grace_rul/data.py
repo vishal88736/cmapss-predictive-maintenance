@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 from sklearn.cluster import KMeans
+from sklearn.mixture import GaussianMixture
 from torch.utils.data import Dataset
 from .config import COLUMNS, SETTINGS, SENSORS
 from .corruption import FAULTS, corrupt_trajectory
@@ -80,12 +81,32 @@ class OperatingRegimeScaler:
     def __init__(self, state=None):
         self.state = state
 
-    def fit(self, frame, subset, seed, *, sensor_transform="asinh", sensor_transform_scale=1.):
+    def fit(self, frame, subset, seed, *, sensor_transform="asinh", sensor_transform_scale=1., regime_selection="per_subset"):
         transform_spec({"sensor_transform": sensor_transform, "sensor_transform_scale": sensor_transform_scale})
         settings = frame[SETTINGS].to_numpy(float)
         sm, ss = settings.mean(0), np.maximum(settings.std(0), 1e-6)
         normalized = (settings - sm) / ss
-        k = 6 if subset in {"FD002", "FD004"} else 1
+        selection = None
+        if regime_selection == "auto":
+            rng = np.random.default_rng(seed)
+            sample = normalized[rng.choice(len(normalized), min(4096, len(normalized)), replace=False)]
+            limit = min(6, len(np.unique(sample, axis=0)), max(1, len(sample) // 10))
+            scores = []
+            for count in range(1, limit + 1):
+                mixture = GaussianMixture(count, covariance_type="full", reg_covar=1e-5,
+                    n_init=2, random_state=seed).fit(sample)
+                score = float(mixture.bic(sample))
+                if mixture.converged_ and np.isfinite(score):
+                    scores.append({"clusters": count, "BIC": score})
+            if not scores:
+                raise ValueError("Operating-regime selection did not converge on fitting settings.")
+            k = min(scores, key=lambda row: row["BIC"])["clusters"]
+            selection = {"method": "fitting_settings_GMM_BIC_then_KMeans", "candidates": scores,
+                         "sample_rows": len(sample), "selected_clusters": k}
+        elif regime_selection == "per_subset":
+            k = 6 if subset in {"FD002", "FD004"} else 1
+        else:
+            raise ValueError("Unknown operating-regime selection policy.")
         centers = KMeans(k, n_init=10, random_state=seed).fit(normalized).cluster_centers_ if k > 1 else normalized.mean(0, keepdims=True)
         regimes = ((normalized[:, None] - centers[None]) ** 2).sum(-1).argmin(1)
         sensors = frame[SENSORS].to_numpy(float)
@@ -116,6 +137,8 @@ class OperatingRegimeScaler:
                       "sensor_transform": sensor_transform, "sensor_transform_scale": float(sensor_transform_scale),
                       "fault_scale_method": "median_regime_p10_p90_over_2.563_with_resolution_floor",
                       "fit_units": sorted(int(i) for i in frame.unit.unique())}
+        if selection is not None:
+            self.state["regime_selection"] = selection
         return self
 
     def transform(self, frame):
@@ -150,8 +173,14 @@ class WindowDataset(Dataset):
         self.epoch, self.progress, self.cache, self.fault_metadata = 0, 1., {}, {}
         self.fault_profile = getattr(scaler, "state", None)
         self.engines, self.samples = [], []
+        self.source_by_unit = {}
         rng = np.random.default_rng(seed)
         for unit, group in frame.groupby("unit", sort=True):
+            if "source_subset" in group:
+                sources = group.source_subset.unique()
+                if len(sources) != 1:
+                    raise ValueError("An engine cannot belong to multiple source groups.")
+                self.source_by_unit[int(unit)] = str(sources[0])
             values, regimes = scaler.transform(group)
             cycles = group.cycle.to_numpy()
             y = (truths[int(unit)] + cycles[-1] - cycles) if truths is not None else cycles[-1] - cycles
@@ -162,6 +191,13 @@ class WindowDataset(Dataset):
                 ends = np.unique(np.r_[np.arange(0, len(values), config["window_stride"]), len(values) - 1])
             elif mode == "test":
                 ends = [len(values) - 1]
+            elif mode in {"validation", "heldout"} and config.get("evaluation_prefix_policy") == "fixed_grid":
+                # A fixed inspection schedule is independent of failure time/RUL.
+                # Appending future observations never moves an existing endpoint.
+                start, step = config["evaluation_start_cycle"], config["evaluation_stride"]
+                ends = np.flatnonzero((cycles >= start) & ((cycles - start) % step == 0))
+                if not len(ends):
+                    raise ValueError("A held engine has no observations on the declared prefix grid.")
             else:
                 count = config["correction_prefixes"] if mode == "correction" else config["validation_prefixes"] if mode == "validation" else 1
                 # A seed per engine keeps endpoints stable across model variants,

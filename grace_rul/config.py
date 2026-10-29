@@ -2,11 +2,14 @@
 
 FORMAT_VERSION = 8
 ARCHITECTURE = "fitted-support-tail-identity-guarded-recovery-gated-rul-v8"
+POOLED_FORMAT_VERSION = 9
+POOLED_ARCHITECTURE = "pooled-condition-aware-guarded-recovery-rul-v9"
 SUPPORTED_ARCHITECTURES = {
     5: "detector-residual-bilstm-wgan-gated-cnn-gru-transformer-residual-v5",
     6: "asinh-balanced-recovery-gated-cnn-gru-transformer-residual-v6",
     7: "validated-detector-linear-identity-gated-cnn-gru-transformer-residual-v7",
     FORMAT_VERSION: ARCHITECTURE,
+    POOLED_FORMAT_VERSION: POOLED_ARCHITECTURE,
 }
 CORRUPTION_PROTOCOL = "structured-sensor-faults-v4"
 SETTINGS = [f"setting_{i}" for i in range(1, 4)]
@@ -16,6 +19,12 @@ COLUMNS = ["unit", "cycle"] + FEATURE_COLUMNS
 SENSOR_NAMES = ["T2", "T24", "T30", "T50", "P2", "P15", "P30", "Nf", "Nc", "epr", "Ps30", "phi", "NRf", "NRc", "BPR", "farB", "htBleed", "Nf-dmd", "PCNfR-dmd", "W31", "W32"]
 SUBSETS = ["FD001", "FD002", "FD003", "FD004"]
 DEFAULT_CONFIG = {
+    "training_scope": "per_subset", "operating_regimes": "per_subset",
+    "evaluation_prefix_policy": "seeded", "evaluation_start_cycle": 30,
+    "evaluation_stride": 30, "pooled_test_fraction": .10,
+    "pooled_validation_fraction": .10, "pooled_calibration_share_of_validation": .50,
+    "pooled_maximum_engines_per_source": None, "pooled_evaluate_official": True,
+    "pooled_protocol_revision": 1,
     "device": "cuda", "validation_fraction": 0.20,
     "calibration_fraction_of_training": 0.10,
     "subsets": SUBSETS, "sequence_length": 70, "local_length": 30,

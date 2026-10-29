@@ -451,3 +451,167 @@ else:
     nbformat.validate(notebook)
 (ROOT / "GRACE_RUL_all_subsets.ipynb").write_text(json.dumps(notebook, indent=1, ensure_ascii=False) + "\n")
 print(f"Created {len(cells)} cells.")
+
+# Shared-model workflow. Keep the earlier per-FD notebook available for old runs.
+cells = []
+md("""
+# GRACE-RUL: one shared model across FD001–FD004
+
+This is the format-9 workflow in `docs/POOLED_V9.md`. It combines the four original
+training files and trains one detector, selective BiLSTM recovery, gated CNN–GRU /
+Transformer and bounded residual corrector. Operating regimes come from fitting
+settings, and predictions require no FD label.
+
+Split **whole engines** into **80% training / 10% validation pool / 10% internal
+test**. The validation pool has independent selection and interval-calibration
+halves. Original official test files remain an additional frozen benchmark.
+The current retained format-8 model is preserved; this notebook does not overwrite
+it. Full pooled accuracy must be measured after training. Quick metrics establish
+execution only. No packages are installed by this notebook.
+""")
+code("""
+from pathlib import Path
+from datetime import datetime, timezone
+import os, sys, json
+
+start = Path(os.environ.get('GRACE_PROJECT_ROOT', Path.cwd())).resolve()
+PROJECT_ROOT = next((p for p in [start, *start.parents] if (p / 'grace_rul').is_dir() and (p / 'data').is_dir()), None)
+if PROJECT_ROOT is None:
+    raise FileNotFoundError('Open alongside grace_rul/ and data/, or set GRACE_PROJECT_ROOT.')
+sys.path.insert(0, str(PROJECT_ROOT))
+os.environ.setdefault('MPLCONFIGDIR', str(PROJECT_ROOT / 'artifacts' / '.matplotlib'))
+import pandas as pd
+import torch
+import matplotlib.pyplot as plt
+from IPython.display import display
+from grace_rul.pooled import pooled_config, prepare_pooled_run, run_pooled_experiment
+from grace_rul.training import device_for
+from grace_rul.artifacts import load_bundle
+
+print('Project:', PROJECT_ROOT)
+print('PyTorch:', torch.__version__, '| CUDA visible:', torch.cuda.is_available())
+""")
+md("""
+## Configuration
+
+Full mode uses the original dimensions and one training seed (42), with three
+complete temporary OOF pipelines. Extra seeds require additional fitting.
+Set `QUICK_RUN = True` for a reduced execution check across all four sources;
+select `DEVICE = 'cpu'` explicitly for CPU. Use a new directory after changing
+training settings; `GRACE_RUN_DIR` can name an unchanged run to resume.
+""")
+code("""
+QUICK_RUN = False
+DEVICE = 'cuda'
+RUN_EXPLANATIONS = False
+CONFIG = pooled_config(quick=QUICK_RUN)
+CONFIG['device'] = DEVICE
+if QUICK_RUN:
+    CONFIG['pooled_evaluate_official'] = False
+TRAINING_DEVICE = device_for(CONFIG)
+stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+RUN_DIR = Path(os.environ.get('GRACE_RUN_DIR', str(PROJECT_ROOT / 'artifacts' / f"pooled_{'quick_' if QUICK_RUN else ''}{stamp}")))
+print('Mode:', 'QUICK EXECUTION CHECK' if QUICK_RUN else 'FULL POOLED TRAINING')
+print('Device:', TRAINING_DEVICE, '| Run directory:', RUN_DIR)
+display(pd.DataFrame({'setting': CONFIG.keys(), 'value': [str(x) for x in CONFIG.values()]}))
+""", ["configuration"])
+md("""
+## Engine partitions before fitting
+
+Engine IDs are namespaced to avoid collisions across source files. FD/source tags
+are used for split balance and reporting only; the model tensor contains 24 measured
+features. Fitting statistics, support and corruption scales exclude validation,
+calibration and test engines. For the full 709-engine inventory the counts are
+567 training, 36 selection, 35 calibration and 71 internal-test engines. The middle
+two groups together form the requested 10% validation pool.
+""")
+code("""
+COMBINED, PARTITIONS, PLAN = prepare_pooled_run(PROJECT_ROOT, CONFIG, RUN_DIR)
+display(pd.DataFrame([{'role': k, 'engines': len(v)} for k, v in PARTITIONS.items()]))
+inventory = pd.DataFrame(PLAN['engine_manifest'])
+display(pd.crosstab(inventory.source_subset, inventory.partition))
+groups = [set(PARTITIONS[k]) for k in ['fit', 'validation', 'calibration', 'test']]
+assert sum(map(len, groups)) == len(set.union(*groups)) == inventory.unit.nunique()
+print('Official test files have not been opened by this planning stage.')
+""")
+md("""
+## Shared architecture and training
+
+Observed settings → shared fitting-only operating normalization → finite-fault
+detector → residual BiLSTM recovery with fitting-support bounds → local CNN–GRU
+and global Transformer → quality gate → bounded OOF residual correction → RUL.
+
+The WGAN-GP critic is used during training only. Missingness is directly observed;
+the simulator's altered-entry labels supervise fitting and never enter inference.
+Noise has temporal memory and a common component within related sensor groups.
+Recovery candidates must pass the declared matrix and clean RMSE/NASA guards,
+both pooled and within every source. These source tags are validation bookkeeping;
+inference always uses the same shared model without an FD label.
+Rejected recovery can retain a validated bypass. This is an experimental pooled
+recipe; neither a configured guard nor passing tests proves improved accuracy.
+
+After seed selection, separate calibration engines produce capped/raw conformal
+contracts. Then the bundle is serialized and frozen before either test evaluation.
+Internal testing uses fixed observed-prefix cycles 30, 60, 90, and so on, avoiding
+the misleading all-zero-RUL final rows of complete trajectories. Official tests
+use their original final observed endpoints. Reused C-MAPSS results remain exploratory.
+""")
+code("""
+BUNDLE_PATH, TABLES = run_pooled_experiment(PROJECT_ROOT, CONFIG, RUN_DIR)
+print('Saved:', BUNDLE_PATH)
+""", ["training"])
+md("""
+## Measured results and learning curves
+
+Pooled/per-source rows all use the same model. Keep `internal_test_10pct` and
+`official_benchmark` scopes separate. Report every degradation or failed guard;
+test values never choose weights or thresholds. Quick results are execution checks.
+""")
+code("""
+results = pd.read_csv(RUN_DIR / 'test_metrics.csv')
+display(results[['partition', 'subset', 'protocol', 'engines', 'N', 'RMSE', 'engine_balanced_RMSE', 'MAE', 'NASA_Score', 'Interval_Coverage']])
+history = pd.read_csv(RUN_DIR / 'training_history.csv')
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+for stage, group in history.groupby('stage', sort=False):
+    axes[0].plot(group.epoch, group.validation_macro_RMSE, marker='.', label=stage)
+axes[0].set(xlabel='Epoch within stage', ylabel='Validation RUL RMSE (cycles)')
+axes[0].legend()
+primary = results[(results.partition == 'internal_test_10pct') & (results.protocol == f"capped_{CONFIG['train_rul_cap']:g}")]
+axes[1].bar(primary.subset, primary.RMSE)
+axes[1].set(ylabel='Internal holdout RMSE (cycles)', title='Shared weights across every source')
+plt.tight_layout(); plt.show()
+""")
+md("""
+## Reload and optional explanations
+
+The inference artifact has one `POOLED` entry. Uploads need engine IDs, consecutive
+cycles, known operating settings and the named sensors; an FD label is optional.
+SHAP/LIME use saved fitting-only backgrounds and explain model behavior, not a
+proven physical diagnosis. Interval coverage under a new fleet or corruption is
+not guaranteed by clean calibration. The full run must be audited before replacing
+historical manuscript measurements.
+""")
+code("""
+bundle, loaded = load_bundle(BUNDLE_PATH, device='cpu')
+assert bundle['format_version'] == 9 and list(loaded) == ['POOLED']
+assert bundle['requires_subset_label'] is False
+print('One shared model; FD labels are not required at inference.')
+print('Parameters:', sum(p.numel() for p in loaded['POOLED']['model'].parameters()))
+if RUN_EXPLANATIONS:
+    from grace_rul.explain import run_explanation_study
+    display(run_explanation_study(PROJECT_ROOT, BUNDLE_PATH, device=str(TRAINING_DEVICE)))
+else:
+    print('Optional explanations skipped; set RUN_EXPLANATIONS = True to compute them.')
+print(f'GRACE_MODEL_PATH="{BUNDLE_PATH}" minor/bin/python -m uvicorn website.backend.app:app --port 8000')
+""")
+notebook = {"nbformat": 4, "nbformat_minor": 5, "cells": cells, "metadata": {
+    "kernelspec": {"display_name": "Python (GRACE-RUL)", "language": "python", "name": "grace-rul"},
+    "language_info": {"name": "python", "version": "3.12"}}}
+try:
+    import nbformat
+except ImportError:
+    pass
+else:
+    nbformat.validate(notebook)
+(ROOT / "GRACE_RUL_pooled.ipynb").write_text(json.dumps(notebook, indent=1, ensure_ascii=False) + "\n")
+print(f"Created pooled notebook with {len(cells)} cells.")

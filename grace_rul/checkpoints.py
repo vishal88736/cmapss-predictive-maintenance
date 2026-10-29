@@ -8,12 +8,12 @@ import numpy as np
 import pandas as pd
 import torch
 
-from .config import ARCHITECTURE, CORRUPTION_PROTOCOL, FORMAT_VERSION
+from .config import ARCHITECTURE, CORRUPTION_PROTOCOL, FORMAT_VERSION, POOLED_ARCHITECTURE, POOLED_FORMAT_VERSION
 
 
 REPORT_OPTIONS = {"progress_interval_seconds", "run_extended_evaluation",
                   "run_matched_benchmarks", "benchmark_variants", "benchmark_tune",
-                  "explanation_examples", "explanation_repeats", "explanation_samples", "background_size"}
+                  "explanation_examples", "explanation_repeats", "explanation_samples", "background_size", "pooled_evaluate_official"}
 
 
 def _training_config(config):
@@ -33,7 +33,9 @@ def pipeline_identity(train_frame, validation_frame, subset, config, seed):
         values = pd.util.hash_pandas_object(frame, index=False).values.tobytes()
         return hashlib.sha256(values + repr(list(frame.columns)).encode()).hexdigest()
 
-    return {"version": FORMAT_VERSION, "architecture": ARCHITECTURE, "corruption_protocol": CORRUPTION_PROTOCOL,
+    pooled = config.get("training_scope") == "pooled"
+    return {"version": POOLED_FORMAT_VERSION if pooled else FORMAT_VERSION,
+            "architecture": POOLED_ARCHITECTURE if pooled else ARCHITECTURE, "corruption_protocol": CORRUPTION_PROTOCOL,
             "subset": subset, "seed": int(seed),
             "config": _training_config(config),
             "fit": fingerprint(train_frame), "validation": fingerprint(validation_frame)}

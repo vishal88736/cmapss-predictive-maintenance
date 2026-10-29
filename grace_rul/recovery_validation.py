@@ -27,6 +27,20 @@ RECOVERY_STATE_BUFFERS = {"finite_repair_thresholds", "recovery_centers", "recov
                           "recovery_upper", "recovery_regime_count", "repair_enabled"}
 
 
+def _scenario_options(config):
+    names = CACHED_SCENARIO_OPTIONS
+    if config.get("evaluation_prefix_policy") == "fixed_grid":
+        names = (*names, "evaluation_prefix_policy", "evaluation_start_cycle", "evaluation_stride")
+    return {name: config.get(name) for name in names}
+
+
+def _prefix_policy(config):
+    if config.get("evaluation_prefix_policy") == "fixed_grid":
+        return {"mode": "absolute_cycle_grid", "first_cycle": config["evaluation_start_cycle"],
+                "stride": config["evaluation_stride"]}
+    return {"mode": "seeded_validation_prefixes", "prefixes_per_engine": config["validation_prefixes"]}
+
+
 def _sensor_config(config):
     method, scale = transform_spec(config)
     return {"sensor_transform": method, "sensor_transform_scale": scale,
@@ -148,10 +162,10 @@ def validate_recovery_audit(audit, config, partitions, model=None):
         raise ValueError("Recovery audit contexts/severities disagree with the declared matrix.")
     prefixes = _positive_integer(config["validation_prefixes"], "validation_prefixes")
     length = _positive_integer(config["sequence_length"], "sequence_length")
-    expected_options = {name: config.get(name) for name in CACHED_SCENARIO_OPTIONS}
+    expected_options = _scenario_options(config)
     if (audit.get("seed") != config["validation_seed"] or audit.get("validation_prefixes") != prefixes or
             audit.get("sequence_length") != length or audit.get("scenario_options") != expected_options or
-            audit.get("prefix_policy") != {"mode": "seeded_validation_prefixes", "prefixes_per_engine": prefixes} or
+            audit.get("prefix_policy") != _prefix_policy(config) or
             audit.get("representation") != list(transform_spec(config))):
         raise ValueError("Recovery audit seed, prefixes, sequence or scenario options disagree with configuration.")
     limits = _guard_limits(config)
@@ -172,7 +186,8 @@ def validate_recovery_audit(audit, config, partitions, model=None):
             raise ValueError("Recovery audit context axes or acceptance are inconsistent.")
         windows = _positive_integer(context.get("windows"), "recovery audit windows")
         if (windows != context.get("expected_windows") or windows < len(validation) or
-                windows > len(validation) * prefixes or (expected_windows is not None and windows != expected_windows)):
+                (config.get("evaluation_prefix_policy") != "fixed_grid" and windows > len(validation) * prefixes) or
+                (expected_windows is not None and windows != expected_windows)):
             raise ValueError("Recovery audit window counts do not cover the declared prefixes.")
         expected_windows = windows
         guards = context.get("guards")
@@ -258,6 +273,10 @@ class RecoveryValidationMatrix:
             for family, severity in cases}
         if any(not len(dataset) for dataset in self.datasets.values()):
             raise ValueError("Every recovery validation context needs at least one observed window.")
+        self.source_matrices = {}
+        if config.get("training_scope") == "pooled" and "source_subset" in self.frame and self.frame.source_subset.nunique() > 1:
+            self.source_matrices = {str(source): RecoveryValidationMatrix(group, scaler, self.config, seed=self.seed)
+                for source, group in self.frame.groupby("source_subset", sort=True)}
 
 
 def _linear_difference(a, b, representation):
@@ -387,7 +406,7 @@ def audit_recovery_candidate(model, matrix, config=None, *, use_repair=True, max
         raise ValueError("Recovery validation severities changed after matrix construction.")
     if tuple(matrix.datasets) != matrix.case_keys:
         raise ValueError("Recovery validation matrix contexts were removed, replaced, or reordered.")
-    if any(config.get(name) != matrix.config.get(name) for name in CACHED_SCENARIO_OPTIONS):
+    if _scenario_options(config) != _scenario_options(matrix.config):
         raise ValueError("Recovery validation scenario configuration changed after caching.")
     if transform_spec(getattr(model, "config", config)) != matrix.representation:
         raise ValueError("Recovery validation model and cached representation disagree.")
@@ -427,18 +446,28 @@ def audit_recovery_candidate(model, matrix, config=None, *, use_repair=True, max
                                   if context else None)
     failing = [{"family": context["family"], "severity": context["severity"], "failed_guards": context["failed_guards"]}
                for context in contexts if not context["accepted"]]
+    source_audits = {}
+    if complete and not failing:
+        for source, source_matrix in matrix.source_matrices.items():
+            measured = audit_recovery_candidate(model, source_matrix, config, use_repair=use_repair,
+                max_batches=max_batches, stop_on_failure=stop_on_failure)
+            source_audits[source] = measured
+            if not measured["accepted"]:
+                failing.extend({**context, "source_subset": source} for context in measured["failing_contexts"])
     worst["contexts"] = worst_contexts
     worst["nonfinite_contexts"] = sum(not context["guards"]["finite"] for context in contexts)
-    return {"complete": bool(complete), "accepted": bool(complete and not failing), "contexts": contexts,
+    return {"complete": bool(complete), "accepted": bool(complete and not failing and
+            all(row["accepted"] for row in source_audits.values())), "contexts": contexts,
+        "source_audits": source_audits,
         "worst": worst, "failing_contexts": failing, "expected_contexts": len(matrix.datasets),
         "evaluated_contexts": len(contexts), "validation_units": matrix.validation_units, "seed": matrix.seed,
         "families": list(RECOVERY_FAMILIES), "severities": list(matrix.severities),
         "use_repair": bool(use_repair), "use_correction": False,
         "mode": "shortlist" if max_batches is not None else "exact",
-        "prefix_policy": {"mode": "seeded_validation_prefixes", "prefixes_per_engine": matrix.config["validation_prefixes"]},
+        "prefix_policy": _prefix_policy(matrix.config),
         "validation_prefixes": int(matrix.config["validation_prefixes"]),
         "sequence_length": int(matrix.config["sequence_length"]),
-        "scenario_options": {name: matrix.config.get(name) for name in CACHED_SCENARIO_OPTIONS},
+        "scenario_options": _scenario_options(matrix.config),
         "representation": list(matrix.representation), "guard_limits": _guard_limits(config),
         "recovery_state_sha256": recovery_state_sha256(model),
         "scope": "Training-held validation engines and declared simulated contexts only; no official test reads. "

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from .config import ARCHITECTURE, CORRUPTION_PROTOCOL, FEATURE_COLUMNS, FORMAT_VERSION, SUPPORTED_ARCHITECTURES
+from .config import ARCHITECTURE, CORRUPTION_PROTOCOL, FEATURE_COLUMNS, FORMAT_VERSION, POOLED_FORMAT_VERSION, SUPPORTED_ARCHITECTURES
 from .data import FAULTS, WindowDataset, load_subset, select_background_indices, source_hashes, split_engines
 from .training import calibrate, device_for, evaluate, exposure_metrics, fit_corrector, fit_pipeline, interval_bounds, metrics, select_fault_thresholds
 from .training import _Progress, validate_training_config
@@ -15,6 +15,9 @@ from .checkpoints import pipeline_identity, save_checkpoint
 
 
 def run_experiment(project_root, config, output_dir=None):
+    if config.get("training_scope") == "pooled":
+        from .pooled import run_pooled_experiment
+        return run_pooled_experiment(project_root, config, output_dir)
     root = Path(project_root)
     validate_training_config(config)
     device = device_for(config)  # Fail before creating a run directory if requested CUDA is unavailable.
@@ -179,11 +182,20 @@ def load_bundle(path, device="cpu"):
     if (bundle.get("format_version") not in SUPPORTED_ARCHITECTURES or
             bundle.get("architecture") != SUPPORTED_ARCHITECTURES.get(bundle.get("format_version")) or
             bundle.get("feature_columns") != FEATURE_COLUMNS):
-        raise ValueError(f"Expected a GRACE-RUL format-{FORMAT_VERSION} or supported format-5/6/7 artifact. Legacy formats below 5 are incompatible.")
-    if set(bundle["models"]) != set(bundle["config"]["subsets"]):
+        raise ValueError("Expected a supported GRACE-RUL format-5/6/7/8/9 artifact. Legacy formats below 5 are incompatible.")
+    pooled = bundle["format_version"] == POOLED_FORMAT_VERSION
+    expected = {"POOLED"} if pooled else set(bundle["config"]["subsets"])
+    if set(bundle["models"]) != expected:
         raise ValueError("Bundle subsets do not match its configuration.")
+    if pooled and (bundle.get("training_scope") != "pooled" or bundle.get("requires_subset_label") is not False):
+        raise ValueError("A format-9 shared bundle must declare pooled inference without subset labels.")
     loaded = {}
     for subset, entry in bundle["models"].items():
+        if pooled:
+            from .pooled import validate_pooled_entry
+            if bundle["config"] != entry["training_config"]:
+                raise ValueError("Shared bundle and model training configurations disagree.")
+            validate_pooled_entry(entry, entry["training_config"])
         thresholds = np.asarray(entry["thresholds"], float)
         calibration = entry["calibration"]
         if thresholds.shape != (21,) or not np.isfinite(thresholds).all() or np.any((thresholds < 0) | (thresholds > 1)):

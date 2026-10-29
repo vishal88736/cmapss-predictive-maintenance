@@ -18,9 +18,10 @@ MAX_ROWS = 200_000
 MAX_ENGINES = 1_000
 
 
-def parse_csv(content, subset):
-    if subset not in SUBSETS:
-        raise InputError("Choose FD001, FD002, FD003, or FD004.")
+def parse_csv(content, subset=None):
+    subset = (subset or "POOLED").strip().upper()
+    if subset not in [*SUBSETS, "POOLED"]:
+        raise InputError("Choose the shared model or a supported legacy FD subset.")
     if not content or len(content) > MAX_FILE_BYTES:
         raise InputError("Upload a non-empty CSV smaller than 25 MB.")
     try:
@@ -57,8 +58,10 @@ def parse_csv(content, subset):
     if not 1 <= len(frame) <= MAX_ROWS:
         raise InputError("The CSV must contain between 1 and 200,000 observations.")
     frame["subset"] = subset if "subset" not in frame else frame["subset"].astype(str).str.strip().str.upper()
-    if not frame["subset"].isin(SUBSETS).all():
+    if subset != "POOLED" and not frame["subset"].isin(SUBSETS).all():
         raise InputError("Every subset value must be FD001, FD002, FD003, or FD004.")
+    if subset == "POOLED" and not frame["subset"].str.fullmatch(r"[A-Z0-9_.:-]{1,64}").all():
+        raise InputError("Optional source labels must contain 1–64 letters, numbers, dots, dashes, colons or underscores.")
     for column in COLUMNS + (["true_rul"] if "true_rul" in frame else []):
         try:
             frame[column] = pd.to_numeric(frame[column], errors="raise")

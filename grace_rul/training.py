@@ -410,6 +410,10 @@ def evaluate(model, dataset, config, fault_thresholds=None, *, capture_recovery_
             "linear_intact_window_RMSE_max": float(supported.max()) if len(supported) else None,
         })
     report.update(exposure_metrics(records))
+    if config.get("training_scope") == "pooled" and getattr(dataset, "source_by_unit", None):
+        sources = records.unit.map(dataset.source_by_unit)
+        report["source_metrics"] = {str(source): {**metrics(rows.prediction, rows.target), **exposure_metrics(rows)}
+            for source, rows in records.groupby(sources, sort=True)}
     return report, records
 
 
@@ -466,6 +470,17 @@ def validation_score(model, clean_dataset, corrupt_dataset, config, *, selection
 
 def validate_training_config(config):
     transform_spec(config)
+    if config.get("training_scope", "per_subset") not in {"per_subset", "pooled"}:
+        raise ValueError("Unknown training_scope.")
+    if config.get("operating_regimes", "per_subset") not in {"per_subset", "auto"}:
+        raise ValueError("Unknown operating_regimes policy.")
+    if config.get("evaluation_prefix_policy", "seeded") not in {"seeded", "fixed_grid"}:
+        raise ValueError("Unknown evaluation_prefix_policy.")
+    if config.get("evaluation_prefix_policy") == "fixed_grid":
+        for key in ["evaluation_start_cycle", "evaluation_stride"]:
+            value = config.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{key} must be a positive integer.")
     for name, choices, default in [
             ("identity_tail_penalty", {"mse", "log_mse"}, "mse"),
             ("recovery_sampling", {"random", "balanced"}, "random"),
@@ -580,7 +595,8 @@ def validate_training_config(config):
         raise ValueError("Transformer dimension must be even and divisible by its head count.")
 
 
-def checkpoint_guards(clean, damaged, clean_reference, config, *, use_repair=True, clean_nasa_reference=None):
+def checkpoint_guards(clean, damaged, clean_reference, config, *, use_repair=True, clean_nasa_reference=None,
+                      clean_source_reference=None):
     guards = {"clean_rmse": clean["RMSE"] <= clean_reference * (1 + config["max_clean_rmse_increase"])}
     # The asymmetric score can worsen while RMSE improves. Guard the original
     # clean validation reference across every subsequent stage, including OOF
@@ -588,6 +604,10 @@ def checkpoint_guards(clean, damaged, clean_reference, config, *, use_repair=Tru
     if clean_nasa_reference is not None and np.isfinite(clean_nasa_reference) and "max_clean_nasa_increase" in config:
         score = clean.get("NASA_Score_Mean", float("inf"))
         guards["clean_nasa"] = bool(np.isfinite(score) and score <= clean_nasa_reference * (1 + config["max_clean_nasa_increase"]) + 1e-12)
+    for source, reference in (clean_source_reference or {}).items():
+        measured = clean.get("source_metrics", {}).get(source, {})
+        guards[f"clean_rmse_{source}"] = measured.get("RMSE", float("inf")) <= reference["RMSE"] * (1 + config["max_clean_rmse_increase"])
+        guards[f"clean_nasa_{source}"] = measured.get("NASA_Score_Mean", float("inf")) <= reference["NASA_Score_Mean"] * (1 + config["max_clean_nasa_increase"]) + 1e-12
     if config["train_repair"] and use_repair:
         guards.update(
             intact=damaged.get("linear_intact_repair_RMSE", damaged.get("intact_repair_RMSE", 0.)) <= config["max_intact_repair_rmse"],
@@ -627,7 +647,8 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
     identity = pipeline_identity(train_frame, validation_frame, subset, config, seed) if checkpoint_path else None
     checkpoint = load_checkpoint(checkpoint_path, identity)
     scaler = OperatingRegimeScaler().fit(train_frame, subset, config["split_seed"],
-        sensor_transform=config.get("sensor_transform", "linear"), sensor_transform_scale=config.get("sensor_transform_scale", 1.))
+        sensor_transform=config.get("sensor_transform", "linear"), sensor_transform_scale=config.get("sensor_transform_scale", 1.),
+        regime_selection=config.get("operating_regimes", "per_subset"))
     model, critic = GraceRUL(config).to(device), TemporalCritic(config).to(device)
     if config.get("recovery_safety") == "fitted_support":
         from .recovery_safety import fit_recovery_envelope
@@ -639,12 +660,14 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
     warm_recovery, detector_audit, detector_history = None, None, []
     selected_recovery_audit, recovery_audits, recovery_matrix = None, [], None
     clean_nasa_reference = float("inf")
+    clean_source_reference = {}
     if checkpoint:
         model.load_state_dict(checkpoint["model"])
         critic.load_state_dict(checkpoint["critic"])
         history, best_score = checkpoint["history"], checkpoint["best_score"]
         clean_reference = checkpoint["clean_reference"]
         clean_nasa_reference = checkpoint.get("clean_nasa_reference", float("inf"))
+        clean_source_reference = checkpoint.get("clean_source_reference", {})
         warm_recovery = checkpoint.get("warm_recovery")
         detector_audit, detector_history = checkpoint.get("detector_audit"), checkpoint.get("detector_history", [])
         selected_recovery_audit = checkpoint.get("selected_recovery_audit")
@@ -763,7 +786,8 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
             progress.emit(f"{label}: validating clean and corrupted engines", force=True)
             score, clean, damaged = validation_score(model, clean_validation, corrupt_validation, config,
                                                      use_repair=stage != "predictor", use_correction=False, **selection_options)
-            repair_guards = checkpoint_guards(clean, damaged, clean_reference, config, clean_nasa_reference=clean_nasa_reference)
+            repair_guards = checkpoint_guards(clean, damaged, clean_reference, config, clean_nasa_reference=clean_nasa_reference,
+                clean_source_reference=clean_source_reference)
             accepted = stage == "predictor" or all(repair_guards.values())
             selected_repair = stage != "predictor" and config["train_repair"]
             candidate_recovery_audit = None
@@ -800,7 +824,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                 bypass_score, bypass_clean, bypass_damaged = validation_score(
                     model, clean_validation, corrupt_validation, config, use_repair=False, use_correction=False, **selection_options)
                 bypass_guards = checkpoint_guards(bypass_clean, bypass_damaged, clean_reference, config,
-                    use_repair=False, clean_nasa_reference=clean_nasa_reference)
+                    use_repair=False, clean_nasa_reference=clean_nasa_reference, clean_source_reference=clean_source_reference)
                 bypass_accepted = all(bypass_guards.values())
                 candidate_metrics.update(bypass_validation_macro_RMSE=bypass_score,
                     bypass_checkpoint_accepted=bypass_accepted,
@@ -845,6 +869,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                 if stage == "predictor":
                     clean_reference = clean["RMSE"]
                     clean_nasa_reference = clean.get("NASA_Score_Mean", float("inf"))
+                    clean_source_reference = copy.deepcopy(clean.get("source_metrics", {}))
             else:
                 stale += 1
             scheduler.step(selection_score)
@@ -862,6 +887,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                     "scheduler": scheduler.state_dict(), "critic_scheduler": critic_scheduler.state_dict(),
                     "clean_reference": clean_reference,
                     "clean_nasa_reference": clean_nasa_reference,
+                    "clean_source_reference": clean_source_reference,
                     "detector_audit": detector_audit, "detector_history": detector_history,
                     "selected_recovery_audit": selected_recovery_audit, "recovery_audits": recovery_audits,
                     "warm_recovery": warm_recovery,
@@ -877,6 +903,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
         p.requires_grad_(True)
     model.pretrained_clean_rmse = float(clean_reference)
     model.pretrained_clean_nasa = float(clean_nasa_reference)
+    model.pretrained_clean_by_source = clean_source_reference
     model.detector_audit, model.detector_history = detector_audit, pd.DataFrame(detector_history)
     model.recovery_validation_audit, model.recovery_validation_history = selected_recovery_audit, recovery_audits
     return model.eval(), scaler, pd.DataFrame(history), best_score
@@ -934,6 +961,11 @@ def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, c
     clean_reference = min(clean["RMSE"], getattr(model, "pretrained_clean_rmse", clean["RMSE"]))
     clean_nasa_reference = min(clean.get("NASA_Score_Mean", float("inf")),
         getattr(model, "pretrained_clean_nasa", float("inf")))
+    clean_source_reference = {}
+    for source, reference in getattr(model, "pretrained_clean_by_source", {}).items():
+        measured = clean.get("source_metrics", {}).get(source, {})
+        clean_source_reference[source] = {key: min(reference[key], measured.get(key, float("inf")))
+                                         for key in ["RMSE", "NASA_Score_Mean"]}
     # Retain a zero-correction candidate if every trained candidate is worse.
     torch.nn.init.zeros_(model.corrector[-1].weight)
     torch.nn.init.zeros_(model.corrector[-1].bias)
@@ -963,7 +995,7 @@ def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, c
             loss.backward(); torch.nn.utils.clip_grad_norm_(model.corrector.parameters(), 5., error_if_nonfinite=True); optimizer.step()
             score, clean, damaged = validation_score(model, clean_val, val, config, **selection_options)
             guards = checkpoint_guards(clean, damaged, clean_reference, config,
-                use_repair=False, clean_nasa_reference=clean_nasa_reference)
+                use_repair=False, clean_nasa_reference=clean_nasa_reference, clean_source_reference=clean_source_reference)
             accepted = all(guards.values())
             history.append({"subset": subset, "seed": seed, "epoch": epoch + 1, "train_loss": float(loss.detach()),
                             "validation_macro_RMSE": score, "validation_clean_RMSE": clean["RMSE"],

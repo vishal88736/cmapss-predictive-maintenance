@@ -1,5 +1,10 @@
 # FD002/FD004 recovery and selection repair
 
+The shared format-9 pipeline now carries this experimental recipe into combined
+training across all four sources. Its [80/10/10 protocol](POOLED_V9.md) requires
+fresh training and uses one shared preprocessor/model. The measurements below
+remain evidence about the earlier per-FD experiments, not pooled-model results.
+
 The October 28 fresh format-8 run did not establish better RUL performance.
 FD002 retained a bypass because missing-input reconstruction failed validation;
 FD004 passed the recovery matrix but its clean test RMSE regressed. The local

@@ -4,6 +4,8 @@ Corrupt sensor data during training, detect damaged readings, recover degradatio
 signals, and predict remaining useful life. The notebook and website share one
 PyTorch implementation in `grace_rul/`.
 
+- [Shared format-9 pipeline: all four sources, 80/10/10](docs/POOLED_V9.md)
+- [Shared-model training notebook](GRACE_RUL_pooled.ipynb)
 - [Current format-8 healthy-sensor protection](docs/RECOVERY_V8.md)
 - [FD002/FD004 training repair and validation pilot](docs/RECOVERY_BALANCE.md)
 - [Run the remaining evaluation, training and paper studies](docs/RUN_REMAINING_STUDIES.md)
@@ -20,7 +22,30 @@ PyTorch implementation in `grace_rul/`.
 - [Website instructions](website/README.md)
 
 
-## Recovery stability check
+## Shared pipeline: 80/10/10
+
+The new workflow combines FD001–FD004 training files into **one model and one
+fitting-only preprocessor**. FD labels are optional at inference. Whole engines
+are split into 567 training, 71 validation-pool and 71 internal-test engines.
+The validation pool contains 36 selection and 35 independent calibration engines.
+Original official tests remain a separate benchmark, evaluated after model freeze.
+
+```bash
+source minor/bin/activate
+set -o pipefail
+pooled_run_dir="artifacts/pooled_v9_$(date -u +%Y%m%d_%H%M%S)"
+python -u scripts/train_pooled.py --device cuda \
+  --output-dir "$pooled_run_dir" \
+  2>&1 | tee "${pooled_run_dir}.log"
+```
+
+Use `GRACE_RUL_pooled.ipynb` for the same workflow in Jupyter. A small CPU execution
+check uses `python scripts/train_pooled.py --quick --device cpu --skip-official`.
+Quick metrics are not accuracy evidence. The shared full model still needs training
+and an audit before claiming improvement or replacing measured paper results.
+See [the complete protocol, outputs and resume instructions](docs/POOLED_V9.md).
+
+## Retained format-8 model and earlier recovery checks
 
 Format 8 bounds finite repairs using clean fitting-engine support. Readings inside
 that support have an original-linear change budget; large outliers can still
@@ -63,7 +88,10 @@ fitting/validation engines. The completed preflight passed those guards, but its
 RUL error remained above the retained starting model. See
 [the measurements and repeat command](docs/RECOVERY_BALANCE.md#short-development-pilot-and-its-limits).
 
-## Environment and notebook
+## Environment and earlier per-FD notebook
+
+The commands below describe the earlier per-FD workflow. For the new shared
+80/10/10 pipeline, use `scripts/train_pooled.py` or `GRACE_RUL_pooled.ipynb` above.
 
 ```bash
 bash scripts/setup_env.sh --cuda

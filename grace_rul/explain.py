@@ -188,11 +188,20 @@ def run_explanation_study(project_root, bundle_path, output_dir=None, *, subsets
     for subset in requested:
         item = loaded[subset]
         config = item["model"].config
-        _, test, truths = load_subset(Path(project_root) / "data", subset)
-        if bundle["config"]["quick_run"]:
-            test = test[test.unit.isin(sorted(test.unit.unique())[:3])]
-        dataset = WindowDataset(test, item["scaler"], config, mode="test", family=family,
-            seed=config["validation_seed"] + 100000, truths=truths)
+        if bundle.get("training_scope") == "pooled":
+            from .pooled import load_pooled_training
+            combined, hashes = load_pooled_training(Path(project_root) / "data", config)
+            if hashes != item["entry"]["source_hashes"]:
+                raise ValueError("Explanation data no longer matches the shared model training sources.")
+            test = combined[combined.unit.isin(item["entry"]["partitions"]["test"])]
+            dataset = WindowDataset(test, item["scaler"], config, mode="heldout", family=family,
+                seed=config["validation_seed"] + 100000)
+        else:
+            _, test, truths = load_subset(Path(project_root) / "data", subset)
+            if bundle["config"]["quick_run"]:
+                test = test[test.unit.isin(sorted(test.unit.unique())[:3])]
+            dataset = WindowDataset(test, item["scaler"], config, mode="test", family=family,
+                seed=config["validation_seed"] + 100000, truths=truths)
         report = explain_dataset(item["model"], dataset, item["entry"]["background"], item["entry"]["background_valid"],
             examples=examples if examples is not None else config.get("explanation_examples", 12),
             repeats=repeats if repeats is not None else config.get("explanation_repeats", 3),

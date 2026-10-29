@@ -98,6 +98,7 @@ function Hero({ setActive, status }) {
 }
 
 function UploadPanel({ onResult, modelStatus }) {
+  const pooled = modelStatus?.training_scope === 'pooled';
   const [file, setFile] = useState(null);
   const [subset, setSubset] = useState('FD001');
   const [preview, setPreview] = useState(null);
@@ -109,7 +110,7 @@ function UploadPanel({ onResult, modelStatus }) {
   async function inspect(nextFile) {
     if (!nextFile) return;
     setError(''); setFile(nextFile); setPreview(null);
-    const inferredSubset = nextFile.name.match(/FD00[1-4]/i)?.[0].toUpperCase() || subset;
+    const inferredSubset = pooled ? 'POOLED' : nextFile.name.match(/FD00[1-4]/i)?.[0].toUpperCase() || subset;
     setSubset(inferredSubset);
     const form = new FormData(); form.append('file', nextFile); form.append('subset', inferredSubset);
     try {
@@ -123,7 +124,7 @@ function UploadPanel({ onResult, modelStatus }) {
   async function runPrediction() {
     if (!file) return setError('Choose a data file first.');
     setBusy(true); setError('');
-    const form = new FormData(); form.append('file', file); form.append('subset', subset); form.append('mc_dropout', 'true');
+    const form = new FormData(); form.append('file', file); form.append('subset', pooled ? 'POOLED' : subset); form.append('mc_dropout', 'true');
     try {
       const response = await fetch('/api/predict', { method: 'POST', body: form });
       const data = await response.json();
@@ -143,7 +144,7 @@ function UploadPanel({ onResult, modelStatus }) {
       <input ref={inputRef} type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={event => inspect(event.target.files[0])} />
       {file ? <><span className="file-icon"><FileSpreadsheet size={20} /></span><strong>{file.name}</strong><small>{preview ? `${formatNumber(preview.rows, 0)} observations · ${formatNumber(preview.engines, 0)} engines` : 'Reading file…'}</small><button className="remove-file" onClick={event => { event.stopPropagation(); setFile(null); setPreview(null); }}><X size={14} /> replace</button></> : <><span className="upload-icon"><Upload size={19} /></span><strong>Drop your CSV or text file here</strong><small>or click to browse · max 25 MB</small></>}
     </div>
-     <div className="form-row input-meta"><label className="field-label">DATASET <select aria-label="Dataset subset" value={subset} onChange={e => { setSubset(e.target.value); setPreview(null); }}>{["FD001", "FD002", "FD003", "FD004"].map(s => <option key={s}>{s}</option>)}</select></label><a className="button button-quiet" href={`/api/sample?subset=${subset}`}>Download sample</a></div>
+     <div className="form-row input-meta">{pooled ? <span>Shared model · dataset label optional</span> : <label className="field-label">DATASET <select aria-label="Dataset subset" value={subset} onChange={e => { setSubset(e.target.value); setPreview(null); }}>{["FD001", "FD002", "FD003", "FD004"].map(s => <option key={s}>{s}</option>)}</select></label>}<a className="button button-quiet" href={`/api/sample?subset=${pooled ? 'POOLED' : subset}`}>Download sample</a></div>
     {preview && <div className="upload-preview"><span><b>{formatNumber(preview.availability)}%</b> available</span><span><b>{formatNumber(preview.engines, 0)}</b> engines</span><span><b>{preview.has_targets ? 'Yes' : 'No'}</b> targets</span></div>}
     {error && <div className="error-message"><BellRing size={15} /> {error}{!modelStatus?.ready && <small> The model bundle will be detected automatically after notebook training finishes.</small>}</div>}
      <button className="button button-primary run-button" disabled={!file || busy || !modelStatus?.ready} onClick={runPrediction}>{busy ? <><LoaderCircle className="spin" size={17} /> EXECUTING INFERENCE…</> : <><Play size={16} fill="currentColor" /> {modelStatus?.ready ? 'Execute prediction' : 'Awaiting trained model'}</>}<ArrowRight size={16} /></button>

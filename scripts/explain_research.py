@@ -17,7 +17,7 @@ def main():
     parser.add_argument("bundle", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--device", choices=["cpu", "cuda", "auto"], default="auto")
-    parser.add_argument("--subsets", nargs="+", choices=SUBSETS)
+    parser.add_argument("--subsets", nargs="+", choices=[*SUBSETS, "POOLED"])
     parser.add_argument("--examples", type=int)
     parser.add_argument("--repeats", type=int)
     parser.add_argument("--samples", type=int)

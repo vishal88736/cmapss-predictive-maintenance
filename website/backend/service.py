@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import torch
 from grace_rul.artifacts import load_bundle
-from grace_rul.config import DEFAULT_CONFIG, FORMAT_VERSION, SUPPORTED_ARCHITECTURES, SENSOR_NAMES, SENSORS
+from grace_rul.config import DEFAULT_CONFIG, FORMAT_VERSION, POOLED_FORMAT_VERSION, SUPPORTED_ARCHITECTURES, SENSOR_NAMES, SENSORS
 from grace_rul.data import make_window
 from grace_rul.model import has_finite_fault_detector
 from grace_rul.explain import explain_window
@@ -85,6 +85,8 @@ class InferenceService:
         for path in root.glob("*/grace_rul_ALL.pt"):
             try:
                 meta = json.loads((path.parent / "run_manifest.json").read_text())
+                if meta.get("format_version") == POOLED_FORMAT_VERSION and meta.get("status") != "complete":
+                    continue
                 if meta.get("format_version") in SUPPORTED_ARCHITECTURES and meta.get("quick_run") is False:
                     candidates.append(path)
             except (OSError, ValueError):
@@ -127,6 +129,9 @@ class InferenceService:
                 "run_type": self.bundle.get("run_type", "training") if ready else None,
                 "weights_retrained": self.bundle.get("weights_retrained") if ready else None,
                 "mode": "quick" if quick else "trained" if ready else "pending", "device": str(self.device),
+                "training_scope": self.config.get("training_scope", "per_subset"),
+                "requires_subset_label": self.config.get("training_scope") != "pooled",
+                "training_sources": self.config["subsets"],
                 "config": self.config, "supported_subsets": list(self.loaded) if ready else self.config["subsets"], "parameters": parameters,
                 "selected_correction_bounds": {s: float(e["model"].correction_bound) for s, e in self.loaded.items()},
                 "selected_repair": {s: bool(e["model"].repair_enabled) for s, e in self.loaded.items()},
@@ -163,14 +168,17 @@ class InferenceService:
         self.refresh()
         with self.lock, torch.inference_mode():
             self.require_model()
-            unknown = set(frame["subset"]) - set(self.loaded)
+            pooled = self.config.get("training_scope") == "pooled"
+            if pooled and "subset" not in frame:
+                frame = frame.assign(subset="POOLED")
+            unknown = set(frame["subset"]) - set(self.loaded) if not pooled else set()
             if unknown:
                 raise InputError("The connected model does not support: " + ", ".join(sorted(unknown)))
             started, engines = time.perf_counter(), []
             groups = list(frame.groupby(["subset", "unit"], sort=True))
             samples = min(8, max(1, 2048 // len(groups)))
             for (subset, unit), group in groups:
-                item = self.loaded[subset]
+                item = self.loaded["POOLED" if pooled else subset]
                 model, scaler, entry = item["model"], item["scaler"], item["entry"]
                 length = model.config["sequence_length"]
                 values, regimes = scaler.transform(group)
@@ -228,7 +236,8 @@ class InferenceService:
                         mc_std = float(draws.std(unbiased=False))
                     finally:
                         model.eval()
-                engines.append({"id": f"{subset}:{unit}", "subset": subset, "unit": int(unit), "last_cycle": int(group.iloc[-1].cycle), "observations": len(group),
+                engines.append({"id": f"{subset}:{unit}", "subset": subset, "model_key": "POOLED" if pooled else subset,
+                    "unit": int(unit), "last_cycle": int(group.iloc[-1].cycle), "observations": len(group),
                     "recovery_enabled": bool(model.repair_enabled),
                     "finite_fault_detection_available": detection_available,
                     "target_convention": protocol, "train_rul_cap": cap,
@@ -268,14 +277,17 @@ class InferenceService:
         self.refresh()
         with self.lock:
             self.require_model()
-            if subset not in self.loaded:
+            pooled = self.config.get("training_scope") == "pooled"
+            if pooled and "subset" not in frame:
+                frame = frame.assign(subset="POOLED")
+            if not pooled and subset not in self.loaded:
                 raise InputError("The connected model does not support this subset.")
             group = frame[(frame["subset"] == subset) & (frame["unit"] == unit)]
             if group.empty:
                 raise InputError("The selected engine is not in the uploaded file.")
             if sensor is not None and not 1 <= sensor <= 21:
                 raise InputError("Sensor number must be between 1 and 21.")
-            item = self.loaded[subset]
+            item = self.loaded["POOLED" if pooled else subset]
             normalized, _ = item["scaler"].transform(group)
             x, valid = make_window(normalized, len(group) - 1, item["model"].config["sequence_length"])
             if sensor is None:

@@ -28,7 +28,8 @@ def model():
 async def read_upload(file, subset):
     content = await file.read(MAX_FILE_BYTES + 1)
     try:
-        return parse_csv(content, subset)
+        service.refresh()
+        return parse_csv(content, "POOLED" if service.config.get("training_scope") == "pooled" else subset)
     except InputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
@@ -36,18 +37,19 @@ async def read_upload(file, subset):
 
 
 @app.post("/api/preview")
-async def preview_upload(file: UploadFile = File(...), subset: str = Form("FD001")):
+async def preview_upload(file: UploadFile = File(...), subset: str = Form("")):
     frame = await read_upload(file, subset)
     return clean_json(preview(frame, file.filename or "upload.csv"))
 
 
 @app.post("/api/predict")
-def predict_upload(file: UploadFile = File(...), subset: str = Form("FD001"), mc_dropout: bool = Form(False)):
+def predict_upload(file: UploadFile = File(...), subset: str = Form(""), mc_dropout: bool = Form(False)):
     # A sync endpoint runs inference in FastAPI's thread pool rather than blocking its event loop.
     content = file.file.read(MAX_FILE_BYTES + 1)
     file.file.close()
     try:
-        frame = parse_csv(content, subset)
+        service.refresh()
+        frame = parse_csv(content, "POOLED" if service.config.get("training_scope") == "pooled" else subset)
         return service.predict(frame, file.filename or "upload.csv", mc_dropout)
     except InputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -56,11 +58,12 @@ def predict_upload(file: UploadFile = File(...), subset: str = Form("FD001"), mc
 
 
 @app.post("/api/explain")
-def explain_upload(file: UploadFile = File(...), subset: str = Form("FD001"), unit: int = Form(...), sensor: int | None = Form(None)):
+def explain_upload(file: UploadFile = File(...), subset: str = Form("POOLED"), unit: int = Form(...), sensor: int | None = Form(None)):
     content = file.file.read(MAX_FILE_BYTES + 1)
     file.file.close()
     try:
-        frame = parse_csv(content, subset)
+        service.refresh()
+        frame = parse_csv(content, "POOLED" if service.config.get("training_scope") == "pooled" else subset)
         return service.explain(frame, subset, unit, sensor)
     except InputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -76,9 +79,9 @@ def health():
 
 @app.get("/api/sample")
 def sample(subset: str = "FD001"):
-    if subset not in SUBSETS:
+    if subset not in [*SUBSETS, "POOLED"]:
         raise HTTPException(status_code=422, detail="Unknown C-MAPSS subset.")
-    source = PROJECT_ROOT / "data" / f"test_{subset}.txt"
+    source = PROJECT_ROOT / "data" / f"test_{'FD001' if subset == 'POOLED' else subset}.txt"
     if not source.exists():
         raise HTTPException(status_code=404, detail="The C-MAPSS sample data is not available.")
     data = pd.read_csv(source, sep=r"\s+", header=None).dropna(axis=1, how="all")
