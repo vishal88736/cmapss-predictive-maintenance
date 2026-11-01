@@ -25,5 +25,10 @@
   "run_extended_evaluation": true,
   "max_clean_rmse_increase": 0.03,
   "max_clean_nasa_increase": 0.10,
+  "calibration_policy": "observable_stratified",
+  "physical_slew_loss_weight": 0.5,
+  "physical_rebound_loss_weight": 0.5,
+  "physical_slew_margin": 0.0,
+  "train_corrector": false,
   "seeds": [42]
 }

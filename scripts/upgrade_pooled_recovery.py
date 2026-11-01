@@ -48,7 +48,8 @@ def _write_json(path, value):
 
 def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
                        device="auto", skip_official=False,
-                       max_clean_rmse_increase=0.03, max_clean_nasa_increase=0.10):
+                       max_clean_rmse_increase=0.03, max_clean_nasa_increase=0.10,
+                       calibration_policy="observable_stratified", overwrite=False):
     root = Path(project_root)
     source_run = Path(source_run_dir).resolve()
     bundle_path = source_run / "grace_rul_ALL.pt"
@@ -66,8 +67,10 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     output = Path(output_dir).resolve() if output_dir else root / "artifacts" / f"pooled_v9_r2_upgraded_{stamp}"
     if output.exists():
-        raise FileExistsError(f"Upgrade output directory already exists: {output}")
-    output.mkdir(parents=True)
+        if not overwrite:
+            raise FileExistsError(f"Upgrade output directory already exists: {output}")
+    else:
+        output.mkdir(parents=True)
     (output / "checkpoints").mkdir(exist_ok=True)
     (output / "predictions").mkdir(exist_ok=True)
 
@@ -78,6 +81,8 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
     config["device"] = str(dev)
     config["max_clean_rmse_increase"] = float(max_clean_rmse_increase)
     config["max_clean_nasa_increase"] = float(max_clean_nasa_increase)
+    if calibration_policy:
+        config["calibration_policy"] = calibration_policy
     if skip_official:
         config["pooled_evaluate_official"] = False
 
@@ -277,6 +282,9 @@ def main():
     parser.add_argument("--skip-official", action="store_true")
     parser.add_argument("--max-clean-rmse-increase", type=float, default=0.03)
     parser.add_argument("--max-clean-nasa-increase", type=float, default=0.10)
+    parser.add_argument("--calibration-policy", choices=["observable_stratified", "engine_prefix_max", "random_prefix"],
+                        default="observable_stratified")
+    parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
     upgrade_pooled_run(
@@ -287,6 +295,8 @@ def main():
         skip_official=args.skip_official,
         max_clean_rmse_increase=args.max_clean_rmse_increase,
         max_clean_nasa_increase=args.max_clean_nasa_increase,
+        calibration_policy=args.calibration_policy,
+        overwrite=args.overwrite,
     )
 
 
