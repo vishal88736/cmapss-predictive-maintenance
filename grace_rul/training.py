@@ -662,7 +662,7 @@ def validate_training_config(config):
         raise ValueError("detach_repair_gate must be a boolean.")
     if config.get("finite_repair_gate") == "validated_threshold" and config.get("detector_training") != "separate":
         raise ValueError("Validated repair thresholds require a separately fitted, frozen detector.")
-    if config.get("calibration_policy", "engine_prefix_max") not in {"engine_prefix_max", "random_prefix"}:
+    if config.get("calibration_policy", "engine_prefix_max") not in {"engine_prefix_max", "random_prefix", "observable_stratified"}:
         raise ValueError("Unknown calibration_policy.")
     if not np.isfinite(config["interval_alpha"]) or not 0 < config["interval_alpha"] < 1:
         raise ValueError("interval_alpha must be strictly between zero and one.")
