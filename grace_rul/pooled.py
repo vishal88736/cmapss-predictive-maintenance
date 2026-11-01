@@ -269,7 +269,10 @@ def run_pooled_experiment(project_root, config=None, output_dir=None):
         write_json(output / f"detector_audit_{MODEL_KEY}_{seed}.json", model.detector_audit)
         write_json(output / f"recovery_validation_{MODEL_KEY}_{seed}.json",
             {"selected": model.recovery_validation_audit, "candidates": model.recovery_validation_history})
-        score = float(correction.loc[correction.checkpoint_accepted, "validation_macro_RMSE"].min())
+        if isinstance(correction, pd.DataFrame) and not correction.empty and "checkpoint_accepted" in correction.columns and bool(correction.checkpoint_accepted.any()):
+            score = float(correction.loc[correction.checkpoint_accepted, "validation_macro_RMSE"].min())
+        else:
+            score = upstream
         thresholds = select_fault_thresholds(model, val, scaler, config, config["validation_seed"])
         summaries.append({"subset": MODEL_KEY, "seed": seed, "validation_selection_RMSE": score,
             "upstream_validation_selection_RMSE": upstream, "repair_selected": bool(model.repair_enabled),

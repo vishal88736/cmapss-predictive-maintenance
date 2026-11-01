@@ -29,6 +29,5 @@
   "physical_slew_loss_weight": 0.5,
   "physical_rebound_loss_weight": 0.5,
   "physical_slew_margin": 0.0,
-  "train_corrector": false,
   "seeds": [42]
 }

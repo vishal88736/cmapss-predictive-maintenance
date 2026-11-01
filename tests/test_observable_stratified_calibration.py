@@ -200,9 +200,9 @@ class TestCorrectorBypass(unittest.TestCase):
         mock_model.parameters.return_value = []
         cfg = {"train_corrector": False}
         corr, oof, cv = fit_corrector(mock_model, Mock(), Mock(), "POOLED", cfg, 42)
-        self.assertEqual(corr, [])
+        self.assertTrue(corr.empty)
         self.assertIsNone(oof)
-        self.assertEqual(cv, [])
+        self.assertTrue(cv.empty)
 
 
 if __name__ == "__main__":

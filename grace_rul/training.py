@@ -1088,7 +1088,7 @@ def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, c
         model.eval()
         for p in model.parameters():
             p.requires_grad_(False)
-        return [], None, []
+        return pd.DataFrame(), None, pd.DataFrame()
     units = np.sort(fit_frame.unit.unique())
     features, bases, targets, audit, cv_reports = [], [], [], [], []
     folds = KFold(config["oof_folds"], shuffle=True, random_state=config["split_seed"])
