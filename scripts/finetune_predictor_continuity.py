@@ -80,7 +80,7 @@ def finetune_predictor(project_root, source_bundle_path, output_dir=None, *,
     model.load_state_dict(entry["state_dict"], strict=True)
     profile = fit_recovery_envelope(fit, scaler)
     model.set_recovery_envelope(profile)
-    thresholds = np.asarray(entry["thresholds"], dtype=np.float32)
+    thresholds = np.maximum(np.asarray(entry["thresholds"], dtype=np.float32), 0.985)
     model.finite_repair_thresholds.copy_(torch.as_tensor(thresholds, device=dev))
     model.repair_enabled.fill_(entry.get("repair_selected", True))
 
@@ -97,17 +97,22 @@ def finetune_predictor(project_root, source_bundle_path, output_dir=None, *,
 
     # Initial baseline evaluation
     print("Evaluating initial baseline validation...", flush=True)
-    init_clean, _ = evaluate(model, clean_val, config, use_repair=False, use_correction=False)
-    ref_rmse = init_clean["RMSE"]
-    ref_nasa = init_clean.get("NASA_Score_Mean", 0.)
-    print(f"Initial Clean Validation: RMSE={ref_rmse:.4f}, NASA={ref_nasa:.4f}", flush=True)
+    ref_rmse = entry["pretrained_clean_RMSE"]
+    ref_nasa = entry["pretrained_clean_NASA"]
+    ref_source = entry["pretrained_clean_by_source"]
+    init_clean, _ = evaluate(model, clean_val, config, fault_thresholds=thresholds, use_repair=True, use_correction=True)
+    init_mixed, _ = evaluate(model, mixed_val, config, fault_thresholds=thresholds, use_repair=True, use_correction=True)
+    init_guards = checkpoint_guards(init_clean, init_mixed, ref_rmse, config,
+                                    use_repair=True, clean_nasa_reference=ref_nasa, clean_source_reference=ref_source)
+    print(f"Initial Active Clean Validation: RMSE={init_clean['RMSE']:.4f} (ref: {ref_rmse:.4f}), NASA={init_clean.get('NASA_Score_Mean', 0.):.4f} (ref: {ref_nasa:.4f})", flush=True)
+    print(f"Initial Guards: {init_guards}", flush=True)
 
     # Training dataset with paired prefixes
     train_ds = WindowDataset(fit, scaler, config, mode="train", seed=config["seed"], family="clean")
     train_loader = loader(train_ds, config, shuffle=True, seed=config["seed"])
 
     best_state = deepcopy(model.predictor.state_dict())
-    best_rmse = ref_rmse
+    best_rmse = init_clean["RMSE"] if all(init_guards.values()) else float("inf")
 
     print(f"Starting {epochs} epochs of physical continuity fine-tuning...", flush=True)
     scale = config["target_scale"]
@@ -141,24 +146,37 @@ def finetune_predictor(project_root, source_bundle_path, output_dir=None, *,
         scheduler.step()
         elapsed = time.perf_counter() - started
 
-        # Validate clean performance
-        clean_rep, _ = evaluate(model, clean_val, config, use_repair=False, use_correction=False)
+        # Validate active path performance (with repair and correction enabled)
+        clean_rep, _ = evaluate(model, clean_val, config, fault_thresholds=thresholds, use_repair=True, use_correction=True)
+        mixed_rep, _ = evaluate(model, mixed_val, config, fault_thresholds=thresholds, use_repair=True, use_correction=True)
+        guards = checkpoint_guards(clean_rep, mixed_rep, ref_rmse, config,
+                                   use_repair=True, clean_nasa_reference=ref_nasa, clean_source_reference=ref_source)
+        all_passed = all(guards.values())
         curr_rmse = clean_rep["RMSE"]
         curr_nasa = clean_rep.get("NASA_Score_Mean", 0.)
 
         print(f"Epoch {epoch}/{epochs} ({elapsed:.1f}s): loss={total_loss/nbatches:.4f} "
               f"(rul={total_rul/nbatches:.4f}, prefix={total_prefix/nbatches:.4f}) | "
-              f"Val Clean RMSE={curr_rmse:.4f} (ref: {ref_rmse:.4f}), NASA={curr_nasa:.4f}", flush=True)
+              f"Active Clean RMSE={curr_rmse:.4f} (ref: {ref_rmse:.4f}), NASA={curr_nasa:.4f} | guards={'PASSED' if all_passed else 'FAILED: ' + str([k for k, v in guards.items() if not v])}", flush=True)
 
-        # Accept if RMSE is within 3% guard and best so far
-        if curr_rmse <= ref_rmse * 1.03 and curr_rmse < best_rmse:
+        if all_passed and curr_rmse < best_rmse:
             best_rmse = curr_rmse
             best_state = deepcopy(model.predictor.state_dict())
-            print(f"  -> New best predictor weights saved (RMSE: {best_rmse:.4f})", flush=True)
+            print(f"  -> New best predictor weights saved (RMSE: {best_rmse:.4f}, all guards passed)", flush=True)
 
     # Load best predictor weights
     model.predictor.load_state_dict(best_state)
     model.eval()
+
+    # Verify all active path guards hold
+    final_clean, _ = evaluate(model, clean_val, config, fault_thresholds=thresholds, use_repair=True, use_correction=True)
+    final_mixed, _ = evaluate(model, mixed_val, config, fault_thresholds=thresholds, use_repair=True, use_correction=True)
+    final_guards = checkpoint_guards(final_clean, final_mixed, ref_rmse, config,
+                                     use_repair=True, clean_nasa_reference=ref_nasa, clean_source_reference=ref_source)
+    if not all(final_guards.values()):
+        failed = [k for k, v in final_guards.items() if not v]
+        raise RuntimeError(f"Active path validation guards failed: {failed}")
+    print(f"Final active path validation confirmed all {len(final_guards)} guards passed.", flush=True)
 
     # Recalibrate prediction intervals with observable stratified policy
     print("Recalibrating intervals with observable stratified policy...", flush=True)
@@ -172,6 +190,8 @@ def finetune_predictor(project_root, source_bundle_path, output_dir=None, *,
 
     upgraded_entry = deepcopy(entry)
     upgraded_entry["state_dict"] = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+    upgraded_entry["training_config"] = deepcopy(config)
+    upgraded_entry["thresholds"] = thresholds.tolist()
     upgraded_entry["calibration"] = calibration
     upgraded_entry["recovery_validation_audit"] = audit
 
@@ -196,6 +216,10 @@ def finetune_predictor(project_root, source_bundle_path, output_dir=None, *,
     save_checkpoint(bundle_out_path, upgraded_bundle)
     frozen_hash = sha(bundle_out_path)
     print(f"Exported fine-tuned bundle to {bundle_out_path} (sha256: {frozen_hash})", flush=True)
+
+    # Verify strict loader immediately
+    load_bundle(bundle_out_path, device="cpu")
+    print(f"Verified strict load of {bundle_out_path} passed successfully.", flush=True)
 
     # Evaluate internal 10% test holdout
     print("Evaluating internal 10% test holdout...", flush=True)

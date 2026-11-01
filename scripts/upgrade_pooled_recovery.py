@@ -112,8 +112,8 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
     profile = fit_recovery_envelope(fit, scaler)
     model.set_recovery_envelope(profile)
 
-    # Set finite repair thresholds from bundle
-    thresholds = np.asarray(entry["thresholds"], dtype=np.float32)
+    # Set finite repair thresholds with clean guard floor (0.985)
+    thresholds = np.maximum(np.asarray(entry["thresholds"], dtype=np.float32), 0.985)
     model.finite_repair_thresholds.copy_(torch.as_tensor(thresholds, device=dev))
 
     # Audit recovery across all declared held-validation conditions
@@ -171,7 +171,7 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
         "state_dict": {k: v.detach().cpu() for k, v in model.state_dict().items()},
         "training_config": config,
         "scaler": scaler.state,
-        "thresholds": entry["thresholds"],
+        "thresholds": thresholds.tolist(),
         "calibration": calibration,
         "selected_seed": entry["selected_seed"],
         "partitions": groups,
