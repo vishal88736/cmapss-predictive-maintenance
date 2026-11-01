@@ -23,5 +23,7 @@
   "tune_before_training": false,
   "run_matched_benchmarks": false,
   "run_extended_evaluation": true,
+  "max_clean_rmse_increase": 0.03,
+  "max_clean_nasa_increase": 0.10,
   "seeds": [42]
 }
