@@ -17,7 +17,13 @@ from .data import WindowDataset
 
 
 METHOD = "split_conformal_absolute"
-POLICIES = {"engine_prefix_max", "random_prefix"}
+POLICIES = {"engine_prefix_max", "random_prefix", "observable_stratified"}
+DEFAULT_OBSERVABLE_BINS = [
+    (0., 35., "critical_eol"),
+    (35., 75., "mid_degradation"),
+    (75., 125., "early_degradation"),
+    (125., float("inf"), "plateau"),
+]
 
 
 def _validate_alpha(alpha):
@@ -113,7 +119,7 @@ def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluato
     evaluation_config = {**config, "maximum_windows": None, "window_stride": 1,
                          "maximum_batches": None, "prefix_consistency_loss_weight": 0.}
     dataset = WindowDataset(frame.sort_values(["unit", "cycle"]), scaler, evaluation_config,
-                            mode="train" if policy == "engine_prefix_max" else "calibration",
+                            mode="train" if policy in {"engine_prefix_max", "observable_stratified"} else "calibration",
                             seed=seed, family="clean")
     if evaluator is None:
         from .training import evaluate
@@ -125,7 +131,12 @@ def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluato
     assumption = ("The fitted model and preprocessing are fixed independently of calibration engines; "
                   "complete calibration and future engine trajectories are exchangeable. "
                   "This assumption is not established by C-MAPSS benchmark membership.")
-    if policy == "engine_prefix_max":
+    if policy == "observable_stratified":
+        scope = ("Finite-sample split conformal with observable-prediction-stratified engine-maximum residual scores; "
+                 "simultaneous clean-prefix coverage within observable prediction intervals requires exchangeable trajectories. "
+                 "No guarantee under fleet/censoring shift, corrupted inputs, or OOD conditions.")
+        coverage_unit = "engine_observable_stratified_prefix"
+    elif policy == "engine_prefix_max":
         scope = ("Finite-sample split conformal with one maximum-prefix residual score per held engine; "
                  "simultaneous clean-prefix coverage requires exchangeable complete engine trajectories. "
                  "No guarantee under fleet/censoring shift, corrupted inputs, or OOD conditions.")
@@ -161,6 +172,26 @@ def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluato
                                       for unit, score in scores.items()]}
         if column == "target":
             contract["target_cap"] = cap
+        if policy == "observable_stratified":
+            stratified_bins = []
+            for lo, hi, name in DEFAULT_OBSERVABLE_BINS:
+                mask = (records.prediction >= lo) & (records.prediction < hi)
+                sub_records = records[mask]
+                if not sub_records.empty:
+                    sub_errors = np.abs(sub_records[column].to_numpy() - sub_records.prediction.to_numpy())
+                    sub_scores = pd.Series(sub_errors, index=sub_records.index).groupby(sub_records.unit).max().sort_index()
+                    bin_radius = split_conformal_quantile(sub_scores.to_numpy(), alpha)
+                    bin_finite_radius = float(bin_radius) if np.isfinite(bin_radius) else finite_radius
+                    stratified_bins.append({
+                        "lo": float(lo), "hi": float(hi) if np.isfinite(hi) else 1e9,
+                        "name": name, "radius": bin_finite_radius, "engines": len(sub_scores)
+                    })
+                else:
+                    stratified_bins.append({
+                        "lo": float(lo), "hi": float(hi) if np.isfinite(hi) else 1e9,
+                        "name": name, "radius": finite_radius, "engines": 0
+                    })
+            contract["stratified_bins"] = stratified_bins
         result["protocols"][protocol] = contract
     # Preserve the primary-contract field names used by existing website code;
     # None explicitly means unbounded, not a measured zero-width interval.
@@ -191,6 +222,15 @@ def interval_bounds(predictions, calibration, protocol=None):
                 raise ValueError("Unbounded calibration must store a JSON-null radius.")
             return np.zeros_like(predictions), np.full_like(predictions, math.inf)
         radius = contract.get("radius")
+        stratified_bins = contract.get("stratified_bins")
+        if stratified_bins and (contract.get("policy") == "observable_stratified" or calibration.get("policy") == "observable_stratified"):
+            radii = np.full(predictions.shape, radius if radius is not None else math.nan, dtype=float)
+            for b in stratified_bins:
+                mask = (predictions >= b["lo"]) & (predictions < b["hi"])
+                if np.any(mask) and b.get("radius") is not None and np.isfinite(b["radius"]):
+                    radii[mask] = b["radius"]
+            lower = np.maximum(0., predictions - radii)
+            return lower, np.maximum(lower, predictions + radii)
         if radius is None or not np.isfinite(radius) or radius < 0:
             raise ValueError("Conformal radius must be finite and nonnegative, or explicitly unbounded.")
         lower = np.maximum(0., predictions - radius)

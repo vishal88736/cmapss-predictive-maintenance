@@ -279,8 +279,8 @@ def run_pooled_experiment(project_root, config=None, output_dir=None):
             best_score = score
             best = {"model": deepcopy(model).cpu(), "scaler": scaler, "oof": oof, "seed": int(seed), "thresholds": thresholds}
         pd.concat(histories, ignore_index=True).to_csv(output / "training_history.csv", index=False)
-        pd.concat(corrections, ignore_index=True).to_csv(output / "correction_history.csv", index=False)
-        pd.concat(cv, ignore_index=True).to_csv(output / "cross_validation_metrics.csv", index=False)
+        (pd.concat([c for c in corrections if len(c)], ignore_index=True) if any(len(c) for c in corrections) else pd.DataFrame()).to_csv(output / "correction_history.csv", index=False)
+        (pd.concat([c for c in cv if len(c)], ignore_index=True) if any(len(c) for c in cv) else pd.DataFrame()).to_csv(output / "cross_validation_metrics.csv", index=False)
         pd.DataFrame(summaries).to_csv(output / "seed_summary.csv", index=False)
         del model
     # Selection is complete before any calibration or test prediction is made.

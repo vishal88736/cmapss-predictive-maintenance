@@ -288,8 +288,19 @@ def prefix_consistency_loss(model, batch, current_prediction=None):
     scale = model.config["target_scale"]
     change = (current_prediction[supported] - previous[supported]) / scale
     target_change = (batch["target"][supported] - batch["previous_target"][supported]) / scale
-    return (F.mse_loss(change, target_change) +
+    loss = (F.mse_loss(change, target_change) +
             F.mse_loss(previous[supported] / scale, batch["previous_target"][supported] / scale))
+    if "cycle" in batch and "previous_cycle" in batch:
+        delta_t = (batch["cycle"][supported] - batch["previous_cycle"][supported]).float().to(current_prediction.device).clamp_min(1.)
+        y_curr = current_prediction[supported]
+        y_prev = previous[supported]
+        slew_margin = float(model.config.get("physical_slew_margin", 0.))
+        excess_slew = F.relu((y_prev - y_curr) - (delta_t + slew_margin)) / scale
+        rebound = F.relu(y_curr - y_prev) / scale
+        slew_w = float(model.config.get("physical_slew_loss_weight", 0.5))
+        rebound_w = float(model.config.get("physical_rebound_loss_weight", 0.5))
+        loss = loss + slew_w * (excess_slew ** 2).mean() + rebound_w * (rebound ** 2).mean()
+    return loss
 
 
 def objectives(model, batch, critic=None, consistency=True):
@@ -1073,6 +1084,11 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
 
 def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, checkpoint_dir=None):
     """Upstream temporary models never fit or select on their OOF engines."""
+    if not config.get("train_corrector", True):
+        model.eval()
+        for p in model.parameters():
+            p.requires_grad_(False)
+        return [], None, []
     units = np.sort(fit_frame.unit.unique())
     features, bases, targets, audit, cv_reports = [], [], [], [], []
     folds = KFold(config["oof_folds"], shuffle=True, random_state=config["split_seed"])
