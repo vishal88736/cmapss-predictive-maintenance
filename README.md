@@ -50,6 +50,16 @@ audit before claiming improvement or replacing measured paper results. The first
 completed shared run and the earlier format-8 model remain retained locally.
 See [the complete protocol, outputs and resume instructions](docs/POOLED_V9.md).
 
+### Upgrading a completed pooled run with validated recovery
+
+If a completed pooled run selected bypass due to narrow clean NASA guards, upgrade it to activate the validated warm recovery generator, audit all 41 validation conditions, recalibrate, and evaluate both test holdouts:
+
+```bash
+python scripts/upgrade_pooled_recovery.py \
+  --source-run artifacts/pooled_v9_r2_20261029_114845 \
+  --device cuda
+```
+
 ## Retained format-8 model and earlier recovery checks
 
 Format 8 bounds finite repairs using clean fitting-engine support. Readings inside
