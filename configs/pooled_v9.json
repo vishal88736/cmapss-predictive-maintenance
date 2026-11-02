@@ -27,6 +27,7 @@
   "max_clean_nasa_increase": 0.10,
   "calibration_policy": "observable_scaled_engine_max",
   "detector_threshold_scope": "source_channel_context",
+  "detector_validation_seed_policy": "configured",
   "physical_slew_loss_weight": 0.5,
   "physical_rebound_loss_weight": 0.5,
   "physical_slew_margin": 0.0,

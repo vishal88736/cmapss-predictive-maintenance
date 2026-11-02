@@ -299,6 +299,17 @@ class DetectorRefinement(unittest.TestCase):
         self.assertEqual(audit["contexts"]["outage"]["positive_cells"], 0)
         self.assertGreater(audit["contexts"]["mixed"]["positive_cells"], 0)
 
+    def test_configured_validation_seed_is_shared_across_detector_training_seeds(self):
+        self.config.update(detector_validation_seed_policy="configured",detector_refinement_epochs=1)
+        seen=[]
+        def selected(model,frame,scaler,config,seed,**kwargs):
+            seen.append(seed)
+            return select_detector_thresholds(model,frame,scaler,config,seed,**kwargs)
+        with patch("grace_rul.detection.select_detector_thresholds",side_effect=selected):
+            self.run_refinement()
+        self.assertTrue(seen)
+        self.assertEqual(set(seen),{self.config["validation_seed"]})
+
 
 if __name__ == "__main__":
     unittest.main()

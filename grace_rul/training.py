@@ -658,6 +658,8 @@ def validate_training_config(config):
         raise ValueError("Unknown finite_repair_gate.")
     if config.get("detector_training", "joint") not in {"joint", "separate"}:
         raise ValueError("detector_training must be joint or separate.")
+    if config.get("detector_validation_seed_policy", "training") not in {"training", "configured"}:
+        raise ValueError("Unknown detector_validation_seed_policy.")
     if not isinstance(config.get("detach_repair_gate", False), bool):
         raise ValueError("detach_repair_gate must be a boolean.")
     if config.get("finite_repair_gate") == "validated_threshold" and config.get("detector_training") != "separate":

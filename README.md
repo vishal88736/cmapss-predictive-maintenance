@@ -4,6 +4,7 @@ Corrupt sensor data during training, detect damaged readings, recover degradatio
 signals, and predict remaining useful life. The notebook and website share one
 PyTorch implementation in `grace_rul/`.
 
+- [Recommended next experiment: grouped development CV and frozen recipe](docs/GROUPED_STUDY.md)
 - [Shared format-9 pipeline: all four sources, 80/10/10](docs/POOLED_V9.md)
 - [Deployment audits, simultaneous adaptive intervals and resumable predictor repair](docs/POOLED_REPAIR.md)
 - [Validation-only repair/corrector diagnostic and optional short predictor pilot](docs/POOLED_PATH_DIAGNOSTIC.md)
@@ -25,6 +26,13 @@ PyTorch implementation in `grace_rul/`.
 
 
 ## Shared pipeline: 80/10/10
+
+For new recipe selection, use [the grouped development study](docs/GROUPED_STUDY.md):
+three outer engine folds, three training seeds, inner-only checkpoint/gate
+selection, fresh preprocessing/weights per fold, then a frozen final recipe.
+It excludes every historical calibration/internal-test engine and treats reused
+benchmarks as exploratory. The direct training commands below reproduce the
+earlier fixed recipe; they do not replace the grouped comparison.
 
 The new workflow combines FD001–FD004 training files into **one model and one
 fitting-only preprocessor**. FD labels are optional at inference. Whole engines

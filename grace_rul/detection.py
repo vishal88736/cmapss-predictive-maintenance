@@ -362,6 +362,13 @@ def refine_bypassed_detector(model, fit_frame, validation_frame, scaler, config,
     improvement = float(config.get("detector_refinement_min_improvement", 1e-4))
     if not 0 <= maximum_fpr < 1 or learning_rate <= 0 or patience < 1 or improvement < 0:
         raise ValueError("Invalid detector refinement FPR, learning rate, patience, or minimum improvement.")
+    policy = config.get("detector_validation_seed_policy", "training")
+    if policy not in {"training", "configured"}:
+        raise ValueError("Unknown detector_validation_seed_policy.")
+    # Historical artifacts retain their training-seed contract. New pooled
+    # studies share fixed inner-validation scenarios across training seeds,
+    # matching the final deployment audit, without changing fitting randomness.
+    selection_seed = int(config["validation_seed"]) if policy == "configured" else int(seed)
     identity = pipeline_identity(fit_frame, validation_frame, "finite-detector-refinement", config, seed)
     identity["detector_families"] = list(DETECTOR_FAMILIES)
     identity["scaler"] = hashlib.sha256(json.dumps(scaler.state, sort_keys=True).encode()).hexdigest()
@@ -400,7 +407,7 @@ def refine_bypassed_detector(model, fit_frame, validation_frame, scaler, config,
             raise ValueError("Detector refinement has no fitting windows.")
         if saved is None:
             thresholds, baseline = select_detector_thresholds(model, validation_frame, scaler, config,
-                                                              seed, return_audit=True)
+                                                              selection_seed, return_audit=True)
             best, best_epoch, stale, start = baseline["score"], 0, 0, 0
             selected_thresholds = thresholds
             selected_metrics = baseline
@@ -439,7 +446,7 @@ def refine_bypassed_detector(model, fit_frame, validation_frame, scaler, config,
                 optimizer.step()
                 losses.append(float(loss.detach()))
             thresholds, metrics = select_detector_thresholds(model, validation_frame, scaler, config,
-                                                             seed, return_audit=True)
+                                                             selection_seed, return_audit=True)
             safe = (metrics["max_context_false_positive_rate"] <= maximum_fpr + 1e-12 and
                     metrics["clean_false_positive_rate"] <= maximum_fpr + 1e-12)
             accepted = safe and metrics["score"] > best + improvement

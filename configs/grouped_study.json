@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "outer_folds": 3,
+  "fold_seed": 20261102,
+  "inner_validation_fraction": 0.2,
+  "training_seeds": [42, 123, 2026],
+  "final_seed": 42,
+  "reference": "shared_reference",
+  "clean_weight": 0.5,
+  "clean_rmse_tolerance": 0.03,
+  "clean_nasa_tolerance": 0.1,
+  "fault_families": ["intermittent", "outage", "block", "noise", "bias", "drift", "stuck", "mixed"],
+  "fault_severities": [0.1, 0.2, 0.3, 0.4, 0.5],
+  "corruption_replicates": 3,
+  "candidates": [
+    {
+      "name": "shared_reference",
+      "overrides": {
+        "prefix_consistency_loss_weight": 0.0,
+        "physical_slew_loss_weight": 0.0,
+        "physical_rebound_loss_weight": 0.0
+      }
+    },
+    {
+      "name": "shared_prefix_regularized",
+      "overrides": {
+        "prefix_consistency_loss_weight": 1.0,
+        "physical_slew_loss_weight": 0.5,
+        "physical_rebound_loss_weight": 0.5
+      }
+    }
+  ]
+}

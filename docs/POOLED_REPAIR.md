@@ -1,5 +1,10 @@
 # Pooled audit, calibration and predictor repair
 
+For new model selection, use [grouped development CV](GROUPED_STUDY.md). The
+single-split predictor pilots below document earlier exploratory refinement;
+they are not independent evidence of generalization and should not be driven
+by a previously inspected engine's failure.
+
 Completed source runs are preserved. Selection uses fitting/held-selection
 engines; previously inspected internal and official benchmarks remain
 exploratory. A validated change may still have worse test metrics.
