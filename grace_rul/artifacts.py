@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import json
+import hashlib
 import os
 from pathlib import Path
 import numpy as np
@@ -12,6 +13,14 @@ from .data import FAULTS, WindowDataset, load_subset, select_background_indices,
 from .training import calibrate, device_for, evaluate, exposure_metrics, fit_corrector, fit_pipeline, interval_bounds, metrics, select_fault_thresholds
 from .training import _Progress, validate_training_config
 from .checkpoints import pipeline_identity, save_checkpoint
+
+
+def inference_fingerprint(model):
+    """Bind interval metadata to the exact tensors and serialized configuration."""
+    from .detection import _state_hash
+    config = {key: value for key, value in model.config.items() if key != "device"}
+    payload = json.dumps(config, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256((_state_hash(model.state_dict()) + payload).encode()).hexdigest()
 
 
 def run_experiment(project_root, config, output_dir=None):
@@ -224,6 +233,16 @@ def load_bundle(path, device="cpu"):
             gates = model.finite_repair_thresholds.detach().cpu().numpy()
             if not np.array_equal(gates, thresholds.astype(np.float32)):
                 raise ValueError("Saved detector thresholds and finite repair gates disagree.")
+        if entry.get("detector_audit", {}).get("status") == "validated_deployment_thresholds" or model.config.get("deployment_audit_revision"):
+            from .detection import validate_deployed_detector_audit
+            validate_deployed_detector_audit(entry.get("detector_audit"), model, entry["partitions"])
+        if (calibration.get("policy") == "observable_scaled_engine_max" or model.config.get("deployment_audit_revision")) and not calibration.get("model_state_sha256"):
+            raise ValueError("Calibration metadata is missing the frozen model-state fingerprint.")
+        if calibration.get("model_state_sha256") and calibration["model_state_sha256"] != inference_fingerprint(model):
+            raise ValueError("Calibration metadata belongs to a different model state or inference configuration.")
+        if calibration.get("policy") == "observable_scaled_engine_max":
+            if set(calibration.get("scale_units", [])) != set(entry["partitions"]["validation"]):
+                raise ValueError("Observable interval scales do not match the saved selection engines.")
         if not all(bool(torch.isfinite(p).all()) for p in model.parameters()):
             raise ValueError("Non-finite model weights.")
         if not bool(torch.isfinite(model.correction_bound)) or float(model.correction_bound) <= 0:
@@ -258,6 +277,47 @@ def validate_calibration_contract(calibration):
             radius = contract["radius"]
             if rank > n or not np.isfinite(radius) or radius < 0 or contract["lower_offset"] != -radius or contract["upper_offset"] != radius:
                 raise ValueError("Invalid finite conformal radius or offsets.")
+        if contract.get("policy") == "observable_scaled_engine_max":
+            bins = contract.get("stratified_bins", [])
+            if not bins or contract.get("simultaneous_across_observable_bins") is not True:
+                raise ValueError("Missing simultaneous observable-scale contract.")
+            if set(contract.get("scale_units", [])) & set(calibration.get("units", [])):
+                raise ValueError("Observable scale fitting overlaps calibration engines.")
+            if not contract.get("scale_units"):
+                raise ValueError("Observable scale fitting needs a saved independent engine scope.")
+            scores = np.asarray([row["score"] for row in contract.get("engine_scores", [])], dtype=float)
+            if len(scores) != n or not np.isfinite(scores).all() or (scores < 0).any():
+                raise ValueError("Invalid normalized engine scores.")
+            scored_units = [row["unit"] for row in contract["engine_scores"]]
+            if len(set(scored_units)) != n or set(scored_units) != set(calibration.get("units", [])):
+                raise ValueError("Normalized scores do not match unique calibration engines.")
+            from .calibration import split_conformal_quantile
+            q = split_conformal_quantile(scores, alpha)
+            expected_q = float(q) if np.isfinite(q) else None
+            if contract.get("normalized_quantile") != expected_q:
+                raise ValueError("Observable normalized quantile disagrees with engine scores.")
+            previous = 0.
+            for index, item in enumerate(bins):
+                scale = item.get("scale")
+                if not isinstance(scale, (int, float)) or not np.isfinite(scale) or scale <= 0:
+                    raise ValueError("Observable interval scale must be positive and finite.")
+                if item.get("lo") != previous:
+                    raise ValueError("Observable interval bins contain gaps or overlaps.")
+                high = item.get("hi")
+                if high is None:
+                    if index != len(bins) - 1:
+                        raise ValueError("Only the final observable bin may be open-ended.")
+                elif not np.isfinite(high) or high <= previous:
+                    raise ValueError("Invalid observable bin endpoint.")
+                expected_radius = expected_q * scale if expected_q is not None else None
+                if item.get("radius") != expected_radius or item.get("unbounded") != (expected_q is None):
+                    raise ValueError("Observable bin radius disagrees with its normalized quantile.")
+                previous = high
+            if previous is not None:
+                raise ValueError("Observable bins must cover the nonnegative prediction domain.")
+            maximum = max(item["radius"] for item in bins) if expected_q is not None else None
+            if contract.get("radius") != maximum:
+                raise ValueError("Global interval alias must bound all observable-bin radii.")
     primary = protocols[calibration["primary_protocol"]]
     for key in ["radius", "lower_offset", "upper_offset", "unbounded", "rank", "n"]:
         if calibration.get(key) != primary[key]:

@@ -17,7 +17,7 @@ from .data import WindowDataset
 
 
 METHOD = "split_conformal_absolute"
-POLICIES = {"engine_prefix_max", "random_prefix", "observable_stratified"}
+POLICIES = {"engine_prefix_max", "random_prefix", "observable_stratified", "observable_scaled_engine_max"}
 DEFAULT_OBSERVABLE_BINS = [
     (0., 35., "critical_eol"),
     (35., 75., "mid_degradation"),
@@ -83,7 +83,33 @@ def _checked_records(records, dataset):
     return records
 
 
-def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluator=None):
+def _observable_scales(records, target_column, floor):
+    """Fit a positive error scale on selection records, before calibration."""
+    error = records[target_column].to_numpy() - records.prediction.to_numpy()
+    fallback = max(floor, float(np.sqrt(np.mean(error ** 2))))
+    bins = []
+    for lo, hi, name in DEFAULT_OBSERVABLE_BINS:
+        mask = (records.prediction >= lo) & (records.prediction < hi)
+        local = error[mask]
+        scale = max(floor, float(np.sqrt(np.mean(local ** 2)))) if len(local) else fallback
+        bins.append({"lo": float(lo), "hi": float(hi) if np.isfinite(hi) else None,
+                     "name": name, "scale": scale, "scale_prefixes": int(mask.sum()),
+                     "scale_engines": int(records.loc[mask, "unit"].nunique())})
+    return bins
+
+
+def _scale_for_prediction(predictions, bins):
+    values = np.asarray(predictions, dtype=float)
+    scales = np.full(values.shape, np.nan)
+    for item in bins:
+        high = math.inf if item["hi"] is None else item["hi"]
+        scales[(values >= item["lo"]) & (values < high)] = item["scale"]
+    if not np.isfinite(scales).all() or (scales <= 0).any():
+        raise ValueError("Observable scales must cover every nonnegative prediction.")
+    return scales
+
+
+def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluator=None, scale_frame=None):
     """Calibrate frozen predictions on held training engines, without fitting.
 
     ``evaluator(model, dataset, config)`` returns ``(report, records)`` and may be
@@ -119,7 +145,7 @@ def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluato
     evaluation_config = {**config, "maximum_windows": None, "window_stride": 1,
                          "maximum_batches": None, "prefix_consistency_loss_weight": 0.}
     dataset = WindowDataset(frame.sort_values(["unit", "cycle"]), scaler, evaluation_config,
-                            mode="train" if policy in {"engine_prefix_max", "observable_stratified"} else "calibration",
+                            mode="train" if policy != "random_prefix" else "calibration",
                             seed=seed, family="clean")
     if evaluator is None:
         from .training import evaluate
@@ -127,13 +153,33 @@ def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluato
     _, records = evaluator(model, dataset, evaluation_config)
     records = _checked_records(records, dataset)
 
+    scale_records, scale_units = None, []
+    if policy == "observable_scaled_engine_max":
+        if scale_frame is None or scale_frame.empty or not {"unit", "cycle"}.issubset(scale_frame):
+            raise ValueError("Adaptive simultaneous intervals need separate selection engines for scale fitting.")
+        scale_units = sorted(int(unit) for unit in scale_frame.unit.unique())
+        if set(scale_units) & set(units):
+            raise ValueError("Observable scale fitting must exclude every calibration engine.")
+        if scale_frame.duplicated(["unit", "cycle"]).any():
+            raise ValueError("Observable scale fitting contains duplicate engine cycles.")
+        scale_dataset = WindowDataset(scale_frame.sort_values(["unit", "cycle"]), scaler, evaluation_config,
+                                      mode="train", seed=seed, family="clean")
+        _, scale_records = evaluator(model, scale_dataset, evaluation_config)
+        scale_records = _checked_records(scale_records, scale_dataset)
+
     primary = f"capped_{cap:g}"
     assumption = ("The fitted model and preprocessing are fixed independently of calibration engines; "
                   "complete calibration and future engine trajectories are exchangeable. "
                   "This assumption is not established by C-MAPSS benchmark membership.")
-    if policy == "observable_stratified":
+    if policy == "observable_scaled_engine_max":
+        scope = ("One maximum normalized residual per independent calibration engine over all prefixes and observable bins; "
+                 "positive bin scales are fixed using selection engines only. Simultaneous clean-trajectory coverage "
+                 "at 1-alpha requires exchangeable complete trajectories and independence from calibration. "
+                 "No guarantee under fleet/censoring shift, corrupted inputs, or OOD conditions.")
+        coverage_unit = "engine_trajectory_simultaneous_observable_scaled"
+    elif policy == "observable_stratified":
         scope = ("Finite-sample split conformal with observable-prediction-stratified engine-maximum residual scores; "
-                 "simultaneous clean-prefix coverage within observable prediction intervals requires exchangeable trajectories. "
+                 "per-bin interpretation only; alpha is not allocated jointly across bins. "
                  "No guarantee under fleet/censoring shift, corrupted inputs, or OOD conditions.")
         coverage_unit = "engine_observable_stratified_prefix"
     elif policy == "engine_prefix_max":
@@ -153,15 +199,29 @@ def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluato
               "primary_protocol": primary, "protocols": {}, "scope": scope,
               "exchangeability_assumption": assumption,
               "target_contract": "Separate capped and raw residual scores; a capped interval is not an uncapped guarantee."}
+    if policy == "observable_scaled_engine_max":
+        result.update(contract_revision=2, scale_units=scale_units,
+                      scale_scope="Held selection engines; independent of calibration engines",
+                      simultaneous_across_observable_bins=True)
     for protocol, column, convention in [
             (primary, "target", f"min(raw_RUL, {cap:g})"),
             ("official_uncapped", "raw_target", "raw_RUL")]:
         errors = np.abs(records[column].to_numpy() - records.prediction.to_numpy())
+        scale_bins = None
+        if policy == "observable_scaled_engine_max":
+            floor = float(config.get("observable_scale_floor", 1.))
+            if not np.isfinite(floor) or floor <= 0:
+                raise ValueError("Observable scale floor must be finite and positive.")
+            scale_bins = _observable_scales(scale_records, column, floor)
+            errors = errors / _scale_for_prediction(records.prediction, scale_bins)
         scores = pd.Series(errors, index=records.index).groupby(records.unit).max().sort_index()
         if len(scores) != len(units):
             raise ValueError("Calibration scores lost an independent engine.")
         radius = split_conformal_quantile(scores.to_numpy(), alpha)
         rank = conformal_rank(len(scores), alpha)
+        normalized_quantile = float(radius) if np.isfinite(radius) else None
+        if scale_bins is not None:
+            radius = radius * max(item["scale"] for item in scale_bins)
         finite_radius = float(radius) if np.isfinite(radius) else None
         contract = {"method": METHOD, "policy": policy, "target_convention": convention,
                     "target_column": column, "alpha": alpha, "engines": len(scores), "n": len(scores),
@@ -172,6 +232,14 @@ def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluato
                                       for unit, score in scores.items()]}
         if column == "target":
             contract["target_cap"] = cap
+        if scale_bins is not None:
+            contract.update(normalized_quantile=normalized_quantile,
+                            score_transform="absolute_error/selection_bin_RMSE",
+                            scale_units=scale_units, scale_floor=floor,
+                            simultaneous_across_observable_bins=True,
+                            stratified_bins=[{**item,
+                                "radius": normalized_quantile * item["scale"] if normalized_quantile is not None else None,
+                                "unbounded": normalized_quantile is None} for item in scale_bins])
         if policy == "observable_stratified":
             stratified_bins = []
             for lo, hi, name in DEFAULT_OBSERVABLE_BINS:
@@ -181,15 +249,16 @@ def calibrate_endpoint_intervals(model, frame, scaler, config, seed, *, evaluato
                     sub_errors = np.abs(sub_records[column].to_numpy() - sub_records.prediction.to_numpy())
                     sub_scores = pd.Series(sub_errors, index=sub_records.index).groupby(sub_records.unit).max().sort_index()
                     bin_radius = split_conformal_quantile(sub_scores.to_numpy(), alpha)
-                    bin_finite_radius = float(bin_radius) if np.isfinite(bin_radius) else finite_radius
+                    bin_finite_radius = float(bin_radius) if np.isfinite(bin_radius) else None
                     stratified_bins.append({
                         "lo": float(lo), "hi": float(hi) if np.isfinite(hi) else 1e9,
-                        "name": name, "radius": bin_finite_radius, "engines": len(sub_scores)
+                        "name": name, "radius": bin_finite_radius, "engines": len(sub_scores),
+                        "unbounded": bin_finite_radius is None
                     })
                 else:
                     stratified_bins.append({
                         "lo": float(lo), "hi": float(hi) if np.isfinite(hi) else 1e9,
-                        "name": name, "radius": finite_radius, "engines": 0
+                        "name": name, "radius": None, "engines": 0, "unbounded": True
                     })
             contract["stratified_bins"] = stratified_bins
         result["protocols"][protocol] = contract
@@ -223,10 +292,13 @@ def interval_bounds(predictions, calibration, protocol=None):
             return np.zeros_like(predictions), np.full_like(predictions, math.inf)
         radius = contract.get("radius")
         stratified_bins = contract.get("stratified_bins")
-        if stratified_bins and (contract.get("policy") == "observable_stratified" or calibration.get("policy") == "observable_stratified"):
-            radii = np.full(predictions.shape, radius if radius is not None else math.nan, dtype=float)
+        if stratified_bins and contract.get("policy", calibration.get("policy")) in {"observable_stratified", "observable_scaled_engine_max"}:
+            # JSON null means unbounded. Never replace an unsupported local
+            # quantile with the global radius and claim the local guarantee.
+            radii = np.full(predictions.shape, math.inf, dtype=float)
             for b in stratified_bins:
-                mask = (predictions >= b["lo"]) & (predictions < b["hi"])
+                high = math.inf if b["hi"] is None else b["hi"]
+                mask = (predictions >= b["lo"]) & (predictions < high)
                 if np.any(mask) and b.get("radius") is not None and np.isfinite(b["radius"]):
                     radii[mask] = b["radius"]
             lower = np.maximum(0., predictions - radii)

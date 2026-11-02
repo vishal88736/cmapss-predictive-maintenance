@@ -185,13 +185,133 @@ def select_detector_thresholds(model, validation_frame, scaler, config, seed, *,
     if not 0 <= maximum_fpr < 1:
         raise ValueError("detector_max_false_positive_rate must be in [0, 1).")
     contexts = _validation_scores(model, validation_frame, scaler, config, seed)
-    thresholds = _select_thresholds(contexts, maximum_fpr)
+    source_contexts = {}
+    selection_contexts = contexts
+    if config.get("training_scope") == "pooled" and "source_subset" in validation_frame:
+        selection_contexts = {}
+        for source, rows in validation_frame.groupby("source_subset", sort=True):
+            values = _validation_scores(model, rows, scaler, config, seed)
+            source_contexts[str(source)] = values
+            selection_contexts.update({f"{source}/{family}": channels for family,channels in values.items()})
+    thresholds = _select_thresholds(selection_contexts, maximum_fpr)
     if return_audit:
         audit = _summarize(contexts, thresholds)
         audit.update(scope="validation engines only; finite labels only", families=list(DETECTOR_FAMILIES),
                      maximum_false_positive_rate=maximum_fpr)
+        if source_contexts:
+            audit["by_source"] = {source:_summarize(values,thresholds) for source,values in source_contexts.items()}
+            audit["threshold_guard_scope"] = "every source/channel/context"
         return thresholds, audit
     return thresholds
+
+
+def select_deployment_thresholds(model, validation_frame, scaler, config, seed, *, minimum=None):
+    """Select one sensor gate per channel under every source/context FPR guard.
+
+    Selection uses held engines only. Existing disabled channels stay disabled;
+    a declared minimum never lowers an existing conservative threshold.
+    """
+    validation = set(int(unit) for unit in validation_frame.unit.unique())
+    if not validation or validation & set(scaler.state.get("fit_units", [])):
+        raise ValueError("Deployment threshold selection requires held validation engines.")
+    current = model.finite_repair_thresholds.detach().cpu().numpy().astype(np.float32)
+    floor = np.maximum(current, np.asarray(minimum, dtype=np.float32)) if minimum is not None else current
+    if floor.shape != (21,) or not np.isfinite(floor).all() or np.any((floor < 0) | (floor > 1)):
+        raise ValueError("Invalid minimum deployment thresholds.")
+    groups = validation_frame.groupby("source_subset", sort=True) if "source_subset" in validation_frame else [("POOLED", validation_frame)]
+    contexts = {}
+    for source, rows in groups:
+        for family, channels in _validation_scores(model, rows, scaler, config, seed).items():
+            contexts[f"{source}/{family}"] = channels
+    maximum_fpr = float(config.get("detector_max_false_positive_rate", .05))
+    if not np.isfinite(maximum_fpr) or not 0 <= maximum_fpr < 1:
+        raise ValueError("Invalid deployment false-positive guard.")
+    chosen = floor.copy()
+    # Tighten only channels that actually violate a source/context bound.
+    # Re-optimizing F1 everywhere can disable useful existing recovery paths.
+    for channel in range(21):
+        if chosen[channel] == 1.:
+            continue
+        for values in contexts.values():
+            scores, labels = values[channel]
+            negative = scores[~labels]
+            allowed = int(np.floor(maximum_fpr * len(negative)))
+            if len(negative) and int((negative >= chosen[channel]).sum()) > allowed:
+                boundary = np.sort(negative)[len(negative)-allowed-1]
+                cut = np.nextafter(np.float32(boundary), np.float32(np.inf))
+                chosen[channel] = max(chosen[channel], min(np.float32(1.), cut))
+    return chosen.tolist()
+
+
+def audit_deployed_thresholds(model, validation_frame, scaler, config, seed, *, previous_audit=None):
+    """Measure the actual frozen gate, without selecting thresholds or weights.
+
+    Preserve the training operating point as history. These metrics belong to
+    the deployed thresholds and held selection engines, never test engines.
+    """
+    validation = sorted(int(unit) for unit in validation_frame.unit.unique())
+    if not validation or set(validation) & set(scaler.state.get("fit_units", [])):
+        raise ValueError("Deployment detector audit requires held validation engines.")
+    thresholds = model.finite_repair_thresholds.detach().cpu().numpy().astype(np.float32)
+    if thresholds.shape != (21,) or not np.isfinite(thresholds).all() or np.any((thresholds < 0) | (thresholds > 1)):
+        raise ValueError("Invalid deployed detector thresholds.")
+    summary = _summarize(_validation_scores(model, validation_frame, scaler, config, seed), thresholds)
+    by_source = {}
+    if "source_subset" in validation_frame:
+        for source, frame in validation_frame.groupby("source_subset", sort=True):
+            by_source[str(source)] = _summarize(
+                _validation_scores(model, frame, scaler, config, seed), thresholds)
+    maximum_fpr = float(config.get("detector_max_false_positive_rate", .05))
+    if not np.isfinite(maximum_fpr) or not 0 <= maximum_fpr < 1:
+        raise ValueError("Invalid deployment false-positive guard.")
+    previous = deepcopy(previous_audit or {})
+    history = previous.get("training_audit", previous)
+    return {"status": "validated_deployment_thresholds", "audit_revision": 1,
+            "accepted": all(report["max_context_false_positive_rate"] <= maximum_fpr
+                            for report in [summary, *by_source.values()]),
+            "selection_performed": False, "thresholds": thresholds.tolist(),
+            "threshold_policy": {"floor": config.get("finite_repair_threshold_floor"),
+                                 "source": "frozen deployment buffers"},
+            "validation_engines": validation, "families": list(DETECTOR_FAMILIES),
+            "severity": .2, "seed": int(seed), "selected": summary,
+            "by_source": by_source, "maximum_false_positive_rate": maximum_fpr,
+            "detector_state_sha256": _state_hash(model.detector.state_dict()),
+            "training_audit": history,
+            "scope": "Held selection engines only; clean and finite fault contexts at severity 0.2; no fitting or selection.",
+            "score_interpretation": "Discrimination scores, not calibrated physical failure probabilities."}
+
+
+def validate_deployed_detector_audit(audit, model, partitions):
+    """Reject a current-looking report for a different gate, detector or scope."""
+    if not isinstance(audit, dict) or audit.get("status") != "validated_deployment_thresholds":
+        raise ValueError("Missing deployed detector audit.")
+    thresholds = model.finite_repair_thresholds.detach().cpu().numpy()
+    saved = np.asarray(audit.get("thresholds", []), dtype=np.float32)
+    if not np.array_equal(saved, thresholds):
+        raise ValueError("Detector audit thresholds disagree with deployed gate.")
+    if audit.get("detector_state_sha256") != _state_hash(model.detector.state_dict()):
+        raise ValueError("Detector audit does not match detector state.")
+    units = audit.get("validation_engines", [])
+    if sorted(units) != sorted(partitions["validation"]) or len(set(units)) != len(units):
+        raise ValueError("Detector audit does not match held selection engines.")
+    if set(units) & (set(partitions.get("fit", [])) | set(partitions.get("calibration", [])) | set(partitions.get("test", []))):
+        raise ValueError("Detector audit overlaps fitting, calibration or test engines.")
+    limit = audit.get("maximum_false_positive_rate")
+    if not isinstance(limit, (int, float)) or not np.isfinite(limit) or not 0 <= limit < 1:
+        raise ValueError("Invalid detector audit false-positive guard.")
+    if limit != model.config.get("detector_max_false_positive_rate", .05):
+        raise ValueError("Detector audit false-positive budget differs from the model configuration.")
+    if audit.get("families") != list(DETECTOR_FAMILIES) or audit.get("seed") != model.config["validation_seed"]:
+        raise ValueError("Detector audit contexts or seed differ from the configured validation scope.")
+    if model.config.get("training_scope") == "pooled" and set(audit.get("by_source", {})) != set(model.config["subsets"]):
+        raise ValueError("Pooled detector audit must report every source subset.")
+    for report in [audit.get("selected", {}), *audit.get("by_source", {}).values()]:
+        rate = report.get("max_context_false_positive_rate")
+        if not isinstance(rate, (int, float)) or not np.isfinite(rate) or not 0 <= rate <= limit:
+            raise ValueError("Deployed detector audit fails its false-positive guard.")
+    if audit.get("accepted") is not True or audit.get("selection_performed") is not False:
+        raise ValueError("Deployed detector audit must be accepted and read-only.")
+    return audit
 
 
 def _state_hash(state):

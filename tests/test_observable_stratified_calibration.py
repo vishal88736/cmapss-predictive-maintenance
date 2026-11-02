@@ -11,6 +11,7 @@ import torch
 from grace_rul.calibration import (calibrate_endpoint_intervals, interval_bounds,
                                    DEFAULT_OBSERVABLE_BINS, POLICIES)
 from grace_rul.training import prefix_consistency_loss, fit_corrector
+from grace_rul.artifacts import validate_calibration_contract
 
 
 class DummyScaler:
@@ -40,6 +41,73 @@ def mock_records(dataset, pred_fn):
 
 
 class TestObservableStratifiedCalibration(unittest.TestCase):
+    @staticmethod
+    def frame(units):
+        return pd.DataFrame([{"unit": u, "cycle": c} for u in units for c in range(1, 151)])
+
+    @staticmethod
+    def config(policy):
+        return {"interval_alpha": .1, "train_rul_cap": 125., "calibration_policy": policy,
+                "window_stride": 1, "maximum_windows": None, "maximum_batches": None}
+
+    def test_sparse_legacy_bin_is_unbounded_even_when_global_radius_is_finite(self):
+        def evaluator(model, dataset, cfg):
+            return {}, mock_records(dataset, lambda engine, end: 10. if engine["unit"] == 1 else 100.)
+        result, _ = calibrate_endpoint_intervals(Mock(), self.frame(range(1, 11)), DummyScaler(),
+            self.config("observable_stratified"), 42, evaluator=evaluator)
+        self.assertFalse(result["unbounded"])
+        bins = result["protocols"]["capped_125"]["stratified_bins"]
+        self.assertIsNone(bins[0]["radius"])
+        lo, hi = interval_bounds([10., 100.], result)
+        self.assertEqual(lo[0], 0.)
+        self.assertTrue(math.isinf(hi[0]))
+        self.assertTrue(math.isfinite(hi[1]))
+
+    def test_scaled_engine_max_uses_independent_scales_and_one_joint_engine_score(self):
+        def evaluator(model, dataset, cfg):
+            return {}, mock_records(dataset, lambda engine, end: float(engine["targets"][end]) +
+                (3. if engine["targets"][end] < 35 else 20.))
+        config = self.config("observable_scaled_engine_max")
+        result, records = calibrate_endpoint_intervals(Mock(), self.frame(range(1, 11)),
+            DummyScaler(), config, 42, evaluator=evaluator, scale_frame=self.frame(range(21, 31)))
+        validate_calibration_contract(result)
+        self.assertEqual(result["scale_units"], list(range(21, 31)))
+        self.assertTrue(result["simultaneous_across_observable_bins"])
+        primary = result["protocols"]["capped_125"]
+        self.assertEqual(len(primary["engine_scores"]), 10)
+        self.assertEqual(primary["rank"], 10)
+        bins = primary["stratified_bins"]
+        for row in primary["engine_scores"]:
+            p = records[records.unit.eq(row["unit"])]
+            scale = np.asarray([next(b["scale"] for b in bins if x >= b["lo"] and
+                                (b["hi"] is None or x < b["hi"])) for x in p.prediction])
+            self.assertAlmostEqual(row["score"], float(np.max(np.abs(p.target-p.prediction)/scale)))
+        self.assertIsNone(bins[-1]["hi"])
+        lo, hi = interval_bounds([10., 50., 100., 130.], result)
+        self.assertLess(hi[0]-lo[0], hi[2]-lo[2])
+        from copy import deepcopy
+        changed = deepcopy(result)
+        changed["protocols"]["capped_125"]["stratified_bins"][0]["radius"] += 1.
+        with self.assertRaisesRegex(ValueError, "bin radius"):
+            validate_calibration_contract(changed)
+
+    def test_scaled_engine_max_rejects_calibration_reuse_and_preserves_infinite_rank(self):
+        def evaluator(model, dataset, cfg):
+            return {}, mock_records(dataset, lambda engine, end: 50.)
+        config = self.config("observable_scaled_engine_max")
+        frame = self.frame(range(1, 9))
+        with self.assertRaisesRegex(ValueError, "separate selection"):
+            calibrate_endpoint_intervals(Mock(), frame, DummyScaler(), config, 42, evaluator=evaluator)
+        with self.assertRaisesRegex(ValueError, "exclude every calibration"):
+            calibrate_endpoint_intervals(Mock(), frame, DummyScaler(), config, 42,
+                evaluator=evaluator, scale_frame=frame)
+        result, _ = calibrate_endpoint_intervals(Mock(), frame, DummyScaler(), config, 42,
+            evaluator=evaluator, scale_frame=self.frame(range(21, 31)))
+        validate_calibration_contract(result)
+        self.assertTrue(result["unbounded"])
+        lo, hi = interval_bounds([1., 50., 120.], result)
+        self.assertTrue(np.isinf(hi).all())
+
     def test_policy_in_policies(self):
         self.assertIn("observable_stratified", POLICIES)
 

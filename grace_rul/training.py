@@ -16,7 +16,7 @@ from .data import FAULTS, OperatingRegimeScaler, WindowDataset
 from .model import GraceRUL, TemporalCritic
 from .normalization import transform_spec
 from .checkpoints import load_checkpoint, pipeline_identity, random_state, restore_random_state, save_checkpoint
-from .calibration import calibrate_endpoint_intervals, interval_bounds
+from .calibration import POLICIES, calibrate_endpoint_intervals, interval_bounds
 
 
 def seed_all(seed, cpu_threads=2):
@@ -662,7 +662,7 @@ def validate_training_config(config):
         raise ValueError("detach_repair_gate must be a boolean.")
     if config.get("finite_repair_gate") == "validated_threshold" and config.get("detector_training") != "separate":
         raise ValueError("Validated repair thresholds require a separately fitted, frozen detector.")
-    if config.get("calibration_policy", "engine_prefix_max") not in {"engine_prefix_max", "random_prefix", "observable_stratified"}:
+    if config.get("calibration_policy", "engine_prefix_max") not in POLICIES:
         raise ValueError("Unknown calibration_policy.")
     if not np.isfinite(config["interval_alpha"]) or not 0 < config["interval_alpha"] < 1:
         raise ValueError("interval_alpha must be strictly between zero and one.")
@@ -1213,5 +1213,10 @@ def select_fault_thresholds(model, validation_frame, scaler, config, seed):
 
 
 @torch.no_grad()
-def calibrate(model, frame, scaler, config, seed):
-    return calibrate_endpoint_intervals(model, frame, scaler, config, seed, evaluator=evaluate)
+def calibrate(model, frame, scaler, config, seed, *, scale_frame=None):
+    calibration, records = calibrate_endpoint_intervals(model, frame, scaler, config, seed,
+                                                       evaluator=evaluate, scale_frame=scale_frame)
+    if config.get("deployment_audit_revision") or config.get("calibration_policy") == "observable_scaled_engine_max":
+        from .artifacts import inference_fingerprint
+        calibration["model_state_sha256"] = inference_fingerprint(model)
+    return calibration, records

@@ -5,6 +5,7 @@ signals, and predict remaining useful life. The notebook and website share one
 PyTorch implementation in `grace_rul/`.
 
 - [Shared format-9 pipeline: all four sources, 80/10/10](docs/POOLED_V9.md)
+- [Deployment audits, simultaneous adaptive intervals and resumable predictor repair](docs/POOLED_REPAIR.md)
 - [Validation-only repair/corrector diagnostic and optional short predictor pilot](docs/POOLED_PATH_DIAGNOSTIC.md)
 - [Shared-model training notebook](GRACE_RUL_pooled.ipynb)
 - [Current format-8 healthy-sensor protection](docs/RECOVERY_V8.md)

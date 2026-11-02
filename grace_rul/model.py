@@ -106,7 +106,11 @@ class RULPredictor(nn.Module):
             local = self.local_projection(last_valid(masked_rnn(self.gru, conv, local_valid), local_valid))
         if branch != "local":
             embedding = self.input_projection(x) + self.position[:, :x.shape[1]]
-            global_features = last_valid(self.transformer(embedding, src_key_padding_mask=~valid), valid)
+            sequence = self.transformer(embedding, src_key_padding_mask=~valid)
+            pooling = self.config.get("global_pooling", "last")
+            if pooling not in {"last", "mean"}:
+                raise ValueError("Global pooling must be last or mean.")
+            global_features = valid_mean(sequence, valid) if pooling == "mean" else last_valid(sequence, valid)
         quality = torch.cat([valid_mean(mask, valid), valid_mean(weights, valid),
             valid_mean((repaired - observed).abs(), valid), valid.float().mean(1, keepdim=True)], -1)
         if branch in {"local", "global"}:
@@ -126,6 +130,8 @@ class RULPredictor(nn.Module):
 class GraceRUL(nn.Module):
     def __init__(self, config):
         super().__init__()
+        if config.get("global_pooling", "last") not in {"last", "mean"}:
+            raise ValueError("Global pooling must be last or mean.")
         self.config = dict(config)
         self.register_buffer("repair_enabled", torch.tensor(bool(config["train_repair"])))
         self.register_buffer("correction_bound", torch.tensor(float(config["correction_bound"])))
@@ -242,7 +248,8 @@ class SingleBranchPredictor(nn.Module):
         x = torch.cat([repaired, settings], -1) * valid.unsqueeze(-1)
         if self.family == "transformer":
             encoded = self.projection(x) + self.position[:, :x.shape[1]]
-            features = last_valid(self.transformer(encoded, src_key_padding_mask=~valid), valid)
+            sequence = self.transformer(encoded, src_key_padding_mask=~valid)
+            features = valid_mean(sequence, valid) if self.config.get("global_pooling", "last") == "mean" else last_valid(sequence, valid)
         else:
             n = min(self.config["local_length"], x.shape[1]) if self.family == "cnn_gru" else x.shape[1]
             x, local_valid = x[:, -n:], valid[:, -n:]

@@ -18,10 +18,11 @@ from starlette.datastructures import UploadFile
 from grace_rul.artifacts import load_bundle
 from grace_rul.config import COLUMNS, FEATURE_COLUMNS, SUBSETS
 from grace_rul.data import OperatingRegimeScaler, WindowDataset
+from grace_rul.model import GraceRUL
 from grace_rul.pooled import (load_pooled_training, pooled_config, prepare_pooled_run,
                               run_pooled_experiment, split_pooled_engines)
 from grace_rul.recovery_validation import RecoveryValidationMatrix, audit_recovery_candidate, validate_recovery_audit
-from grace_rul.training import checkpoint_guards, fit_pipeline, seed_all
+from grace_rul.training import calibrate, checkpoint_guards, fit_pipeline, seed_all
 from website.backend.inference import parse_csv
 from website.backend.service import InferenceService
 
@@ -205,6 +206,29 @@ class SharedWorkflow(unittest.TestCase):
         self.assertEqual(manifest["training_device"], "cpu")
         for name in ["detector_history_POOLED_42.csv", "detector_audit_POOLED_42.json", "recovery_validation_POOLED_42.json"]:
             self.assertTrue((self.path.parent / name).is_file())
+
+    def test_observable_scaled_contract_strict_round_trip_and_stale_prediction_state(self):
+        bundle = deepcopy(self.bundle)
+        entry = bundle["models"]["POOLED"]
+        config = {**entry["training_config"], "calibration_policy": "observable_scaled_engine_max"}
+        model = GraceRUL(config)
+        model.load_state_dict(entry["state_dict"], strict=True)
+        frame, _ = load_pooled_training(self.root / "data", config)
+        scaler = self.loaded["POOLED"]["scaler"]
+        calibration, _ = calibrate(model, frame[frame.unit.isin(self.groups["calibration"])], scaler,
+            config, config["validation_seed"]+2,
+            scale_frame=frame[frame.unit.isin(self.groups["validation"])])
+        entry["calibration"], entry["training_config"] = calibration, config
+        bundle["config"] = config
+        path = self.root / "scaled.pt"
+        torch.save(bundle,path)
+        checked, _ = load_bundle(path)
+        self.assertEqual(checked["config"]["calibration_policy"], "observable_scaled_engine_max")
+        self.assertTrue(calibration["unbounded"])
+        entry["state_dict"]["predictor.head.3.bias"] += .1
+        torch.save(bundle,path)
+        with self.assertRaisesRegex(ValueError, "Calibration metadata belongs"):
+            load_bundle(path)
 
     def test_saved_metrics_recompute_and_internal_test_is_not_only_failure_endpoints(self):
         predictions = pd.read_csv(self.path.parent / "predictions/internal_test_10pct_clean_s0_r0.csv.gz")

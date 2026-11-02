@@ -290,7 +290,14 @@ def run_pooled_experiment(project_root, config=None, output_dir=None):
     model, scaler, seed = best["model"].to(device), best["scaler"], best["seed"]
     manifest.update(status="calibrating", selected_seed=seed, validation_selection_RMSE=best_score)
     write_json(output / "run_manifest.json", manifest)
-    calibration, calibration_records = calibrate(model, cal, scaler, config, config["validation_seed"] + 2)
+    from .detection import audit_deployed_thresholds
+    deployment_audit = audit_deployed_thresholds(model, val, scaler, config, config["validation_seed"],
+                                                 previous_audit=model.detector_audit)
+    write_json(output / f"detector_audit_{MODEL_KEY}_{seed}.json", deployment_audit)
+    if not deployment_audit["accepted"]:
+        raise ValueError("Final deployed detector fails source/channel/context false-positive guards.")
+    calibration, calibration_records = calibrate(model, cal, scaler, config,
+        config["validation_seed"] + 2, scale_frame=val)
     calibration_records.to_csv(output / "calibration_POOLED.csv", index=False)
     background_ds = WindowDataset(fit, scaler, config, mode="correction", seed=seed, family="clean")
     indices, background_metadata = select_background_indices(background_ds, config["background_size"], seed)
@@ -304,7 +311,7 @@ def run_pooled_experiment(project_root, config=None, output_dir=None):
         "pipeline_identity": pipeline_identity(fit, val, MODEL_KEY, config, seed), "oof_audit": best["oof"],
         "source_hashes": plan["source_hashes"], "split_protocol": {"outer": [0.8, 0.1, 0.1], "unit": "whole_engine",
             "validation_pool_calibration_share": .5, "identity_sha256": plan["identity_sha256"]},
-        "detector_audit": model.detector_audit, "recovery_support": model.recovery_support,
+        "detector_audit": deployment_audit, "recovery_support": model.recovery_support,
         "recovery_validation_audit": model.recovery_validation_audit,
         "background_metadata": background_metadata, "background": torch.stack([b["reference"] for b in background]),
         "background_valid": torch.stack([b["valid"] for b in background])}

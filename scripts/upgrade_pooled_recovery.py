@@ -31,6 +31,7 @@ from grace_rul.config import (CORRUPTION_PROTOCOL, FEATURE_COLUMNS, POOLED_ARCHI
                              POOLED_FORMAT_VERSION, SUBSETS)
 from grace_rul.data import OperatingRegimeScaler, WindowDataset, load_subset
 from grace_rul.model import GraceRUL
+from grace_rul.detection import audit_deployed_thresholds, select_deployment_thresholds
 from grace_rul.pooled import (MODEL_KEY, _evaluate_partition, evaluation_cases,
                              load_pooled_training, sha, validate_pooled_entry, write_json)
 from grace_rul.recovery_safety import fit_recovery_envelope
@@ -49,7 +50,8 @@ def _write_json(path, value):
 def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
                        device="auto", skip_official=False,
                        max_clean_rmse_increase=0.03, max_clean_nasa_increase=0.10,
-                       calibration_policy="observable_stratified", overwrite=False):
+                       calibration_policy="observable_scaled_engine_max", overwrite=False,
+                       threshold_floor=.985):
     root = Path(project_root)
     source_run = Path(source_run_dir).resolve()
     bundle_path = source_run / "grace_rul_ALL.pt"
@@ -67,8 +69,7 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     output = Path(output_dir).resolve() if output_dir else root / "artifacts" / f"pooled_v9_r2_upgraded_{stamp}"
     if output.exists():
-        if not overwrite:
-            raise FileExistsError(f"Upgrade output directory already exists: {output}")
+        raise FileExistsError(f"Upgrade output must be a fresh directory: {output}")
     else:
         output.mkdir(parents=True)
     (output / "checkpoints").mkdir(exist_ok=True)
@@ -77,10 +78,16 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
     # Load source bundle and checkpoint
     bundle, loaded = load_bundle(bundle_path, device="cpu")
     entry = bundle["models"][MODEL_KEY]
+    source_hash = sha(bundle_path)
     config = deepcopy(entry["training_config"])
     config["device"] = str(dev)
     config["max_clean_rmse_increase"] = float(max_clean_rmse_increase)
     config["max_clean_nasa_increase"] = float(max_clean_nasa_increase)
+    config["finite_repair_threshold_floor"] = float(threshold_floor)
+    config["finite_repair_threshold_selection"] = "minimal_source_context_FPR_with_floor"
+    config["deployment_audit_revision"] = 1
+    if not np.isfinite(threshold_floor) or not 0 <= threshold_floor <= 1:
+        raise ValueError("Finite detector threshold floor must be in [0, 1].")
     if calibration_policy:
         config["calibration_policy"] = calibration_policy
     if skip_official:
@@ -93,6 +100,8 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
 
     # Reconstruct data partitions
     frame, hashes = load_pooled_training(root / "data", config)
+    if hashes != entry["source_hashes"]:
+        raise ValueError("Source training data hashes changed.")
     groups = entry["partitions"]
     engines = pd.DataFrame(entry["engine_manifest"])
     fit = frame[frame.unit.isin(groups["fit"])].copy()
@@ -113,7 +122,9 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
     model.set_recovery_envelope(profile)
 
     # Set finite repair thresholds with clean guard floor (0.985)
-    thresholds = np.maximum(np.asarray(entry["thresholds"], dtype=np.float32), 0.985)
+    thresholds = np.maximum(np.asarray(entry["thresholds"], dtype=np.float32), threshold_floor)
+    thresholds = np.asarray(select_deployment_thresholds(model, val, scaler, config,
+                            config["validation_seed"], minimum=thresholds), dtype=np.float32)
     model.finite_repair_thresholds.copy_(torch.as_tensor(thresholds, device=dev))
 
     # Audit recovery across all declared held-validation conditions
@@ -155,11 +166,17 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
 
     # Calibrate prediction intervals on independent calibration engines
     print("Calibrating prediction intervals on independent calibration engines...", flush=True)
-    calibration, calibration_records = calibrate(model, cal, scaler, config, config["validation_seed"] + 2)
+    detector_audit = audit_deployed_thresholds(model, val, scaler, config,
+        config["validation_seed"], previous_audit=entry.get("detector_audit"))
+    if not detector_audit["accepted"]:
+        write_json(output / "detector_audit_rejected.json", detector_audit)
+        raise PooledUpgradeRejected("Deployment detector audit rejected the current thresholds.")
+    calibration, calibration_records = calibrate(model, cal, scaler, config,
+        config["validation_seed"] + 2, scale_frame=val)
     calibration_records.to_csv(output / "calibration_POOLED.csv", index=False)
 
     # Save detector audit and recovery validation reports
-    write_json(output / "detector_audit_POOLED_42.json", entry.get("detector_audit", {}))
+    write_json(output / "detector_audit_POOLED_42.json", detector_audit)
     write_json(output / "recovery_validation_POOLED_42.json", {"selected": audit, "candidates": [audit]})
 
     # Assemble and export upgraded bundle
@@ -185,7 +202,7 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
         "oof_audit": entry.get("oof_audit", []),
         "source_hashes": entry.get("source_hashes", hashes),
         "split_protocol": entry.get("split_protocol", {}),
-        "detector_audit": entry.get("detector_audit", {}),
+        "detector_audit": detector_audit,
         "recovery_support": profile,
         "recovery_validation_audit": audit,
         "background_metadata": background_meta,
@@ -282,9 +299,9 @@ def main():
     parser.add_argument("--skip-official", action="store_true")
     parser.add_argument("--max-clean-rmse-increase", type=float, default=0.03)
     parser.add_argument("--max-clean-nasa-increase", type=float, default=0.10)
-    parser.add_argument("--calibration-policy", choices=["observable_stratified", "engine_prefix_max", "random_prefix"],
-                        default="observable_stratified")
-    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--calibration-policy", choices=["observable_scaled_engine_max", "observable_stratified", "engine_prefix_max", "random_prefix"],
+                        default="observable_scaled_engine_max")
+    parser.add_argument("--threshold-floor", type=float, default=.985)
     args = parser.parse_args()
 
     upgrade_pooled_run(
@@ -296,7 +313,7 @@ def main():
         max_clean_rmse_increase=args.max_clean_rmse_increase,
         max_clean_nasa_increase=args.max_clean_nasa_increase,
         calibration_policy=args.calibration_policy,
-        overwrite=args.overwrite,
+        threshold_floor=args.threshold_floor,
     )
 
 

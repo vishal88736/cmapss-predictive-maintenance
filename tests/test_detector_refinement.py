@@ -14,8 +14,9 @@ from torch.utils.data import Dataset
 
 from grace_rul.config import DEFAULT_CONFIG, quick_config
 from grace_rul.detection import (DETECTOR_FAMILIES, _select_thresholds, _summarize,
-                                 balanced_finite_fault_loss, refine_bypassed_detector,
-                                 select_detector_thresholds)
+                                 audit_deployed_thresholds, balanced_finite_fault_loss,
+                                 refine_bypassed_detector, select_detector_thresholds,
+                                 select_deployment_thresholds, validate_deployed_detector_audit)
 from grace_rul.model import GraceRUL
 
 
@@ -120,6 +121,59 @@ class DetectorRefinement(unittest.TestCase):
         for name, value in before.items():
             torch.testing.assert_close(value, self.model.state_dict()[name], rtol=0, atol=0)
 
+    def test_deployment_audit_uses_current_gate_and_preserves_old_operating_point(self):
+        historical = {"thresholds": [.01] * 21, "selected": {"score": .8}}
+        self.model.finite_repair_thresholds.fill_(.985)
+        before = deepcopy(self.model.state_dict())
+        with patch("grace_rul.detection.WindowDataset", TinyFaultWindows):
+            audit = audit_deployed_thresholds(self.model, self.validation, self.scaler,
+                                              self.config, self.config["validation_seed"], previous_audit=historical)
+        self.assertTrue(audit["accepted"])
+        self.assertFalse(audit["selection_performed"])
+        np.testing.assert_array_equal(audit["thresholds"], self.model.finite_repair_thresholds.numpy())
+        self.assertEqual(audit["training_audit"], historical)
+        self.assertEqual(audit["selected"]["clean_false_positive_rate"], 0.)
+        self.assertEqual(audit["selected"]["contexts"]["stuck"]["recall"], 0.)
+        partitions = {"validation": [5, 6], "fit": [1, 2, 3, 4], "calibration": [7], "test": [8]}
+        validate_deployed_detector_audit(audit, self.model, partitions)
+        bad = deepcopy(audit)
+        bad["maximum_false_positive_rate"] = .5
+        with self.assertRaisesRegex(ValueError, "budget differs"):
+            validate_deployed_detector_audit(bad, self.model, partitions)
+        for name, value in before.items():
+            torch.testing.assert_close(value, self.model.state_dict()[name], rtol=0, atol=0)
+        self.model.finite_repair_thresholds[0] = .5
+        with self.assertRaisesRegex(ValueError, "thresholds disagree"):
+            validate_deployed_detector_audit(audit, self.model, partitions)
+
+    def test_deployment_audit_rejects_false_alarms_and_fitting_overlap(self):
+        self.model.finite_repair_thresholds.fill_(.01)
+        with patch("grace_rul.detection.WindowDataset", TinyFaultWindows):
+            audit = audit_deployed_thresholds(self.model, self.validation, self.scaler, self.config, 17)
+        self.assertFalse(audit["accepted"])
+        self.assertEqual(audit["selected"]["clean_false_positive_rate"], 1.)
+        with self.assertRaisesRegex(ValueError, "held validation"):
+            audit_deployed_thresholds(self.model, self.fit, self.scaler, self.config, 17)
+
+    def test_source_guarded_threshold_selection_repairs_a_pooled_fpr_blind_spot(self):
+        frame = self.validation.assign(source_subset=["FD001", "FD002"])
+        def scores(model, rows, scaler, config, seed):
+            negatives = np.r_[np.full(18, .01), np.full(2, .99)].astype(np.float32)
+            clean = (negatives, np.zeros(20, bool))
+            fault = (np.r_[negatives, np.float32(.999)], np.r_[np.zeros(20, bool), True])
+            return {"clean": [clean]*21, "stuck": [fault]*21}
+        self.model.finite_repair_thresholds.fill_(.985)
+        with patch("grace_rul.detection._validation_scores", side_effect=scores):
+            before = audit_deployed_thresholds(self.model, frame, self.scaler, self.config, 17)
+            self.assertFalse(before["accepted"])
+            selected = select_deployment_thresholds(self.model, frame, self.scaler, self.config, 17)
+            self.model.finite_repair_thresholds.copy_(torch.tensor(selected))
+            after = audit_deployed_thresholds(self.model, frame, self.scaler, self.config, 17)
+        self.assertTrue(after["accepted"])
+        self.assertEqual(after["selected"]["contexts"]["stuck"]["recall"], 1.)
+        for source in after["by_source"].values():
+            self.assertLessEqual(source["max_context_false_positive_rate"], .05)
+
     def test_finite_loss_excludes_missing_and_padded_labels(self):
         logits = torch.zeros((1, 3, 2), requires_grad=True)
         available = torch.tensor([[[False, False], [True, False], [True, True]]])
@@ -127,6 +181,16 @@ class DetectorRefinement(unittest.TestCase):
         balanced_finite_fault_loss(logits, labels, available).backward()
         self.assertEqual(float(logits.grad[~available].abs().sum()), 0.)
         self.assertGreater(float(logits.grad[available].abs().sum()), 0.)
+
+    def test_deployment_threshold_minimum_cannot_lower_existing_or_disabled_gates(self):
+        self.model.finite_repair_thresholds.fill_(.995)
+        self.model.finite_repair_thresholds[0] = 1.
+        original = self.model.finite_repair_thresholds.tolist()
+        negatives = (np.full(20, .5, np.float32), np.zeros(20, bool))
+        with patch("grace_rul.detection._validation_scores", return_value={"clean": [negatives]*21}):
+            selected = select_deployment_thresholds(self.model, self.validation, self.scaler,
+                self.config, 17, minimum=[.1]*21)
+        self.assertEqual(selected, original)
 
     def test_unchanged_baseline_restored_when_candidates_do_not_improve(self):
         self.config["detector_refinement_epochs"] = 2
