@@ -101,8 +101,11 @@ def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=
     if family is not None and family not in [*FAULTS, "mixed", "clean"]:
         raise ValueError(f"Unknown fault family: {family}")
     reference = np.asarray(reference)
+    # A clean trajectory may legitimately carry missing measurement cells
+    # (acquisition dropout) without any simulated fault. Every other family
+    # needs a finite reference so the physical context is well defined.
     if (reference.ndim != 2 or reference.shape[1] != 24 or not len(reference) or
-            reference.dtype.kind != "f" or not np.isfinite(reference).all()):
+            reference.dtype.kind != "f" or (family != "clean" and not np.isfinite(reference).all())):
         raise ValueError("Reference must be a nonempty finite floating array with 24 columns.")
     compressed = transform_spec(profile)[0] == "asinh"
     # Fault equations retain the original linear z-score/raw-unit semantics.
@@ -124,7 +127,11 @@ def corrupt_trajectory(reference, rng, family=None, severity=.2, clean_fraction=
             output[:, 3:][changed] = encode_sensors(x[:, 3:], profile)[changed]
         else:
             output = x
-        altered = output[:, 3:] != reference[:, 3:]
+        # A clean reference defines no altered entry: a missing cell is an
+        # acquisition dropout, not a simulated fault, and NaN comparisons must
+        # not be counted as damage.
+        altered = (np.zeros(reference[:, 3:].shape, dtype=bool) if family == "clean"
+                   else output[:, 3:] != reference[:, 3:])
         return (output, altered, metadata) if return_metadata else (output, altered)
 
     if family == "clean" or (family is None and rng.random() < clean_fraction):
