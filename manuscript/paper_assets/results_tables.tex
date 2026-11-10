@@ -1,0 +1,147 @@
+% Auto-generated from the preserved results. Regenerate with generate_assets.py.
+\newcommand{\PrimaryResultsTable}{%
+\begin{table*}[!t]
+\caption{Clean official-endpoint results across five training seeds. RMSE and MAE are in cycles.}
+\label{tab:clean_results}
+\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Subset & $N$ & Capped RMSE & MAE & NASA $S$ & Uncapped RMSE & MAE & NASA $S$ \\
+\midrule
+FD001 & 100 & $13.45\pm0.60$ & 9.38 & 345.08 & $14.46\pm0.59$ & 10.43 & 376.61 \\
+FD002 & 259 & $11.92\pm0.28$ & 8.83 & 578.34 & $24.89\pm0.57$ & 16.31 & 5213.46 \\
+FD003 & 100 & $12.69\pm0.73$ & 8.55 & 388.78 & $14.07\pm0.62$ & 10.11 & 423.75 \\
+FD004 & 248 & $13.71\pm0.51$ & 9.20 & 1003.14 & $25.18\pm1.00$ & 17.61 & 3960.93 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize RMSE is mean $\pm$ sample standard deviation over seeds. Other entries are seed means. Capped targets are $\min(y,125)$; uncapped targets are original official RUL. NASA $S$ is the total over each test fleet, averaged over seeds; it is not normalized by $N$.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\ExportedModelsTable}{%
+\begin{table}[!t]
+\caption{Validation-selected exported paths and all-seed recovery retention.}
+\label{tab:exported_paths}
+\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrr}
+\toprule
+Subset & Seed & Repair & Correction & $b$ & Retained \\
+\midrule
+FD001 & 2026 & On & $\Delta=0$ & 15 & 2/5 \\
+FD002 & 42 & Off & Learned & 30 & 0/5 \\
+FD003 & 42 & On & Learned & 30 & 3/5 \\
+FD004 & 42 & Off & Learned & 5 & 0/5 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\columnwidth}\scriptsize $b$ is the correction bound in cycles, not a guaranteed nonzero correction. Retained counts seeds that keep learned recovery.\end{minipage}
+\end{table}
+}
+
+\newcommand{\DataPartitionTable}{%
+\begin{table}[!t]
+\caption{Engine counts and partitions in the local C-MAPSS snapshot.}
+\label{tab:cmapss_subsets}
+\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+Subset & Train & Test & Fit & Cal. & Val. & Reg. \\
+\midrule
+FD001 & 100 & 100 & 72 & 8 & 20 & 1 \\
+FD002 & 260 & 259 & 187 & 21 & 52 & 6 \\
+FD003 & 100 & 100 & 72 & 8 & 20 & 1 \\
+FD004 & 249 & 248 & 179 & 20 & 50 & 6 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\columnwidth}\scriptsize All models use 21 sensor columns, three settings, a 70-cycle input window and a 30-cycle local branch. FD004 counts describe the supplied files rather than an assumed canonical ordering.\end{minipage}
+\end{table}
+}
+
+\newcommand{\FaultResultsTable}{%
+\begin{table*}[!t]
+\caption{Additional frozen-selected-model check: capped RMSE, severity $v=0.2$, one fixed replicate.}
+\label{tab:fault_results}
+\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+Subset & Seed & Clean & Noise & Bias & Drift & Stuck & Intermit. & Outage & Block & Mixed \\
+\midrule
+FD001 & 2026 & 13.44 & 13.88 & 13.39 & 13.56 & 13.39 & 13.52 & 14.52 & 13.70 & 13.63 \\
+FD002 & 42 & 12.18 & 12.23 & 12.29 & 12.30 & 43.10 & 12.47 & 13.80 & 12.90 & 21.34 \\
+FD003 & 42 & 13.52 & 13.81 & 13.00 & 13.21 & 13.94 & 13.98 & 14.65 & 14.69 & 13.68 \\
+FD004 & 42 & 13.37 & 13.92 & 13.52 & 13.37 & 48.54 & 13.46 & 14.12 & 13.64 & 25.57 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize These are separate CPU review evaluations, not five-seed means or a full severity sweep. All official endpoints are included, including histories with no active corruption in their last window. Severity is a mechanism control, not a percentage of bad entries.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\ActiveFaultTable}{%
+\begin{table*}[!t]
+\caption{Active-fault-only capped RMSE with affected endpoint count in parentheses.}
+\label{tab:active_faults}
+\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Subset & Noise & Bias & Drift & Stuck & Intermit. & Outage & Block & Mixed \\
+\midrule
+FD001 & $13.80\;(91)$ & $13.26\;(91)$ & $13.44\;(91)$ & $12.67\;(63)$ & $13.39\;(91)$ & $14.50\;(91)$ & $13.59\;(91)$ & $13.65\;(93)$ \\
+FD002 & $12.34\;(224)$ & $12.41\;(224)$ & $12.35\;(223)$ & $46.26\;(222)$ & $12.62\;(224)$ & $14.13\;(224)$ & $13.11\;(224)$ & $22.18\;(226)$ \\
+FD003 & $14.01\;(97)$ & $13.19\;(97)$ & $13.41\;(97)$ & $13.20\;(73)$ & $14.19\;(97)$ & $14.87\;(97)$ & $14.91\;(97)$ & $13.64\;(94)$ \\
+FD004 & $14.21\;(227)$ & $13.78\;(227)$ & $13.64\;(226)$ & $50.75\;(226)$ & $13.72\;(227)$ & $14.42\;(227)$ & $13.91\;(227)$ & $26.71\;(221)$ \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Same frozen models, severity and replicate as Table~\ref{tab:fault_results}. An endpoint is active only when its observed window contains at least one changed sensor reading. Counts differ by fault and subset.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\CalibrationDetectionTable}{%
+\begin{table*}[!t]
+\caption{Calibration, finite-fault detection and correction diagnostics with distinct scopes.}
+\label{tab:calibration_detection}
+\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+Subset & Cal. engines & Capped cov. (\%) & Uncapped cov. (\%) & Recall (\%) & F1 & Gain (\%) \\
+\midrule
+FD001 & 8 & 79.2 & 75.4 & 0.00 & 0.0000 & 0.055 \\
+FD002 & 21 & 76.8 & 61.2 & 0.00 & 0.0000 & 0.390 \\
+FD003 & 8 & 90.8 & 90.0 & 5.02 & 0.0511 & 0.102 \\
+FD004 & 20 & 78.7 & 60.0 & 0.00 & 0.0000 & 1.213 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Coverage: five-seed mean on clean official endpoints, nominal target 90\%. Recall/F1: selected-model validation diagnostic under saved thresholds, combining clean/bias/drift/noise cases. Gain: five-seed mean reduction of clean/active-mixed validation RMSE from correction. These columns are not one common test experiment.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\RepairRejectionTable}{%
+\begin{table}[!t]
+\caption{Recovery/joint checkpoint outcomes across the five primary seeds.}
+\label{tab:recovery_rejection}
+\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrr}
+\toprule
+Subset & Tried & Admissible & Min. recon. RMSE \\
+\midrule
+FD001 & 181 & 67 & 0.498 \\
+FD002 & 150 & 0 & 399.210 \\
+FD003 & 202 & 90 & 0.581 \\
+FD004 & 150 & 0 & 104.893 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\columnwidth}\scriptsize Admissibility includes clean, intact-entry and reconstruction constraints. A candidate must also improve the selection score to replace the saved checkpoint. Reconstruction limit: 1.5.\end{minipage}
+\end{table}
+}

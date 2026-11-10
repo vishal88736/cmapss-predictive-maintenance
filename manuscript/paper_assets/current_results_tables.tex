@@ -1,0 +1,107 @@
+% Generated from hashed saved numerical evidence.
+
+\newcommand{\CurrentPartitionTable}{%
+\begin{table*}[!t]
+\caption{Current pooled engine-disjoint data partitions.}
+\label{tab:pooled_partitions}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+Subset & Available training & Fit & Selection & Calibration & Internal test & Official test \\
+\midrule
+FD001 & 100 & 80 & 5 & 5 & 10 & 100 \\
+FD002 & 260 & 208 & 13 & 13 & 26 & 259 \\
+FD003 & 100 & 80 & 5 & 5 & 10 & 100 \\
+FD004 & 249 & 199 & 13 & 12 & 25 & 248 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize The 10\% development pool is divided equally between selection and independent calibration; integer rounding gives the exact counts above. Internal observations are fixed-grid prefixes, not independent engines.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\CurrentPooledResultsTable}{%
+\begin{table*}[!t]
+\caption{Current format-9 model: capped-target clean and structured-fault results.}
+\label{tab:current_pooled}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Subset & $N_{\rm off}$ & RMSE & MAE & NASA $S$ & Cov. (\%) & Stuck & Mixed & Internal RMSE \\
+\midrule
+POOLED & 707 & 12.01 & 8.52 & 1671.0 & 99.3 & 15.08 & 13.05 & 13.30 \\
+FD001 & 100 & 11.93 & 8.85 & 194.0 & 100.0 & 12.27 & 12.36 & 10.23 \\
+FD002 & 259 & 11.77 & 8.47 & 541.1 & 99.6 & 15.47 & 13.21 & 11.91 \\
+FD003 & 100 & 11.25 & 7.92 & 234.3 & 100.0 & 12.24 & 11.70 & 10.18 \\
+FD004 & 248 & 12.57 & 8.69 & 701.6 & 98.4 & 16.60 & 13.65 & 16.31 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Fault columns average three corruption replicates at severity 0.2; these are not training-seed replications. Coverage is empirical clean prefix/endpoint coverage. Internal RMSE uses all saved prefixes from each source's reserved engines. Targets are $\min(r,125)$; units are cycles except NASA score and coverage.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\CurrentComparisonTable}{%
+\begin{table*}[!t]
+\caption{Pooled comparison including the immediate preserved source.}
+\label{tab:current_comparison}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrr}
+\toprule
+Artifact & Official clean RMSE & MAE & Internal clean RMSE & Stuck @0.2 & Stuck all levels \\
+\midrule
+Original revision 2 & 12.106 & 8.550 & 13.441 & 18.858 & 20.571 \\
+Preserved fine-tuned source & 11.942 & 8.228 & 13.128 & 15.206 & 17.879 \\
+Current frozen repair & 12.008 & 8.522 & 13.297 & 15.077 & 17.664 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize All rows use their own saved predictions and capped targets. Fault values are arithmetic means across declared corruption realizations; the last column also averages severities. Reused test results are descriptive and do not select the current candidate.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\CurrentRawResultsTable}{%
+\begin{table*}[!t]
+\caption{Clean official results against original, uncapped RUL.}
+\label{tab:current_raw}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrr}
+\toprule
+Subset & Raw RMSE & Raw MAE & Raw NASA $S$ & Raw coverage (\%) \\
+\midrule
+POOLED & 22.34 & 14.69 & 9201.9 & 99.3 \\
+FD001 & 13.34 & 9.92 & 226.9 & 99.0 \\
+FD002 & 24.59 & 15.96 & 4660.4 & 99.6 \\
+FD003 & 13.11 & 9.48 & 277.2 & 100.0 \\
+FD004 & 25.49 & 17.38 & 4037.4 & 98.8 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize The point model was trained on capped targets. Raw errors and separately calibrated raw intervals expose long-horizon limitations; capped coverage must not be presented as raw-target coverage.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\CurrentAdaptiveCalibrationTable}{%
+\begin{table*}[!t]
+\caption{Observable interval scales and radii of the frozen model.}
+\label{tab:adaptive_calibration}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrr}
+\toprule
+Predicted RUL bin & Scale capped & Scale raw & Radius capped & Radius raw & Scale engines \\
+\midrule
+$[0,35)$ & 3.86 & 3.86 & 15.14 & 14.23 & 36 \\
+$[35,75)$ & 8.60 & 8.60 & 33.69 & 31.66 & 36 \\
+$[75,125)$ & 11.14 & 81.97 & 43.68 & 301.93 & 36 \\
+$[125,\infty)$ & 1.00 & 175.52 & 3.92 & 646.53 & 24 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Scales use selection engines only. A single engine-maximum normalized score across all bins is calibrated on 35 separate engines; alpha=0.1, rank=33. Scale-engine counts are overlapping bin support, not independent calibration sample counts. No true RUL is required to choose a bin at inference.\end{minipage}
+\end{table*}
+}

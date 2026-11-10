@@ -1,0 +1,31 @@
+\begin{figure*}[!t]
+\centering
+\begin{tikzpicture}[y=.97cm,
+ box/.style={draw,rounded corners,fill=gray!8,align=center,text width=3.45cm,minimum height=1.45cm,inner sep=4pt,font=\scriptsize},
+ data/.style={box,fill=gray!15,minimum height=1.4cm},
+ link/.style={-{Latex[length=1.8mm]},thick}]
+\node[data] (fit) at (1.8,0) {\textbf{Fit: \CurrentFitEngines{} engines}\\All four training sources\\Weights and fitting statistics};
+\node[data] (sel) at (6.0,0) {\textbf{Selection: \CurrentSelectionEngines{} engines}\\Checkpoints, thresholds, bounds\\No calibration/test selection};
+\node[data] (cal) at (10.2,0) {\textbf{Calibration: \CurrentCalibrationEngines{} engines}\\Reserved until choice freezes\\One score per engine};
+\node[data] (test) at (14.5,0) {\textbf{Frozen evaluation}\\\CurrentTestEngines{} internal engines\\\CurrentOfficialEngines{} official endpoints};
+\node[box] (scale) at (1.8,-2.0) {Fitting-only preprocessing\\GMM-BIC then regime clustering\\Asinh + raw-unit fault profile};
+\node[box] (pre) at (6.0,-2.0) {Clean predictor pretraining\\Local CNN--GRU + Transformer\\Original clean/source references};
+\node[box] (det) at (10.2,-2.0) {Independent finite detector\\Fitting labels only\\Held validation thresholds};
+\node[box] (gen) at (14.5,-2.0) {Paired recurrent recovery\\Generator + training-only critic\\Healthy identity + reconstruction};
+\draw[link] (fit)--(scale);\draw[link] (scale)--(pre);\draw[link] (pre)--(det);\draw[link] (det)--(gen);
+\draw[link] (sel.south)--++(0,-.25)-| (det.north);
+\node[box] (oof) at (14.5,-4.0) {Three fitting-engine OOF folds\\Bounded supervised correction\\Zero-correction fallback};
+\node[box] (support) at (10.2,-4.0) {Validated selective recovery\\Fit-only support projection\\Conservative source/context gates};
+\node[box] (refine) at (6.0,-4.0) {Predictor-only refinement\\Clean + active corrupted RUL\\Deterministic prefix + tail loss};
+\node[box] (guards) at (1.8,-4.0) {Held selection guards\\Clean/source RMSE + NASA\\Mixed/stuck RUL + engine tails};
+\draw[link] (gen)--(oof);\draw[link] (oof)--(support);\draw[link] (support)--(refine);\draw[link] (refine)--(guards);
+\node[box] (matrix) at (1.8,-6.1) {Complete recovery matrix\\Clean + 8 families $\times$ 5 levels\\All \CurrentRecoveryContexts{} contexts must pass};
+\node[box] (freeze) at (6.0,-6.1) {Freeze accepted forward path\\Weights, gates, support, corrector\\Fit observable scales on selection};
+\node[box] (interval) at (10.2,-6.1) {Independent calibration\\Max normalized prefix error/engine\\Separate capped/raw targets};
+\node[box] (export) at (14.5,-6.1) {Strict serialized round trip\\Bind audits + calibration to state\\Then evaluate fixed holdouts};
+\draw[link] (guards)--(matrix);\draw[link] (matrix)--(freeze);\draw[link] (freeze)--(interval);\draw[link] (interval)--(export);
+\draw[link] (cal.south)--++(0,-.2)--(16.65,-.9)--(16.65,-5.1)-| (interval.north);
+\end{tikzpicture}
+\caption{Current pooled workflow. Approximately 80\% of available training engines fit weights; the 10\% development pool is divided between selection and calibration, and 10\% is internal test. Exact rounded counts are shown. Detector/generator/corrector weights are frozen during predictor refinement; source OOF correction is retained and revalidated. Rejected candidates produce no deployable export. Validation-only pilots precede any new calibration or holdout evaluation.}
+\label{fig:workflow}
+\end{figure*}

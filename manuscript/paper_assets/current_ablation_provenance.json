@@ -1,0 +1,35 @@
+{
+  "created_at_utc": "2026-11-09T21:35:23.005254+00:00",
+  "scope": "Generated from saved ablation measurements; no training, inference or selection.",
+  "run": "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified",
+  "bundle_sha256": "577cf22aec575a40b611c992b87fa3bf57f3a66c2f2f73a66ede3957e3459457",
+  "ablation_run": "artifacts/component_ablation_full",
+  "inputs": {
+    "cmapss-predictive-maintenance/artifacts/component_ablation_full/ablation_summary.csv": {
+      "sha256": "505a0ecceda40721d19915b979edfa0dfca6cbb93c867198b65a468ababd3dbb",
+      "bytes": 4004
+    },
+    "cmapss-predictive-maintenance/artifacts/component_ablation_full/ablation_metrics.csv": {
+      "sha256": "57e6c41c9ee5d178526388e4d6d5d143719c8977bee5b377687fb41c86fc2bed",
+      "bytes": 19527
+    },
+    "cmapss-predictive-maintenance/artifacts/component_ablation_full/manifest.json": {
+      "sha256": "2d15a40ca2b0bbf712fc4cb3b69755418edeea84e68316a779dab39c089b981d",
+      "bytes": 1226
+    }
+  },
+  "outputs": {
+    "current_ablation_macros.tex": "3696059e9b76995200c2d1eeced3f0239428b995a73fccbeac408f9de86540ce",
+    "current_ablation_section.tex": "d41736d584588d8480c087f43a7e42cad78ef66eacdba5a454a71c54c5faa53a"
+  },
+  "post_freeze_diagnostic": true,
+  "deployed_artifact_changed": false,
+  "stuck_gains_by_severity": {
+    "0.1": 4.987,
+    "0.2": 4.989,
+    "0.3": 4.022,
+    "0.5": 3.616
+  },
+  "corrector_max_abs_delta": 0.03,
+  "clean_mean_interval_width": 68.17
+}

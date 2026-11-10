@@ -1,0 +1,110 @@
+{
+  "created_at_utc": "2026-11-09T21:35:21.628813+00:00",
+  "scope": "Current pooled model; data-derived text/tables/figures; no model execution",
+  "runs": {
+    "v9_pooled": "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified"
+  },
+  "baseline_run": "cmapss-predictive-maintenance/artifacts/pooled_v9_r2_20261029_114845",
+  "bundle_sha256": "577cf22aec575a40b611c992b87fa3bf57f3a66c2f2f73a66ede3957e3459457",
+  "input_files": {
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/paper_model_summary.json": {
+      "sha256": "8cd005b1072b17c8492f5832a799b095e3c7893d83116dd22f3049ae2f721757",
+      "bytes": 104484
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/run_manifest.json": {
+      "sha256": "86c28578d1b8f152a22b8f91089d2ed6c513322efed6055368a3a295d4aa965a",
+      "bytes": 48008
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/official_benchmark_metrics.csv": {
+      "sha256": "e05dd74a4f6c7c7ed1ca3a0660c610c65bb1f12263761e9e9b95992f71034066",
+      "bytes": 443691
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/internal_test_10pct_metrics.csv": {
+      "sha256": "0472cb5eea879d88c58ff7f1f67520f05a0171835370039cb1fc24c006adc1db",
+      "bytes": 443923
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_v9_r2_20261029_114845/official_benchmark_metrics.csv": {
+      "sha256": "c6f4047e91b85f7fc6da37cc92ac88b6c7ad9dabe372560d9b1cb01293bb04af",
+      "bytes": 437575
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_v9_r2_20261029_114845/internal_test_10pct_metrics.csv": {
+      "sha256": "9ee8860c8cb8c7dc525d96e5b3ec83432f57c31db2f7d851e79faea5be3487c5",
+      "bytes": 440718
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_v9_r2_finetuned_final/official_benchmark_metrics.csv": {
+      "sha256": "51273608a975edb590457c666b96786154e67b5f006a4b202c2c3f733d069a3f",
+      "bytes": 444000
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_v9_r2_finetuned_final/internal_test_10pct_metrics.csv": {
+      "sha256": "d2f82bb3aafe2ddcfda518c255808eadadc1398d26dbb712926b1d2b6e9d39df",
+      "bytes": 445056
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/predictions/official_benchmark_clean_s0_r0.csv.gz": {
+      "sha256": "69c242580049a13c80f8e70c18f053dd6169a954c94e19f90886168c0bad3db8",
+      "bytes": 36954
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/predictions/internal_test_10pct_clean_s0_r0.csv.gz": {
+      "sha256": "2543535d6abe560ce863687beb12651a3b5bb4ef729063cb1e6f541ea584a6f8",
+      "bytes": 23931
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/active_path_validation.json": {
+      "sha256": "d39122dde104a21a896a3b8374a79673256a6bf78f7b22c9eb0b5d3704fbcce3",
+      "bytes": 28635
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/engine179_raw_trace.csv": {
+      "sha256": "aff70c8ed5cceeaac642fff8575c1577bb93373a788923024893f1517dcebeab",
+      "bytes": 61370
+    },
+    "paper_assets/current_architecture.tex": {
+      "sha256": "fae3b699b20439a5e0dd4885f7a7b1d3db64bc4f78597b6c82db9851c7de4a08",
+      "bytes": 4383
+    },
+    "paper_assets/current_workflow.tex": {
+      "sha256": "3e13b24dd1d45aa62e7939009738cd33de9d67c3196ca072f43127ea0d920a77",
+      "bytes": 3431
+    },
+    "paper_assets/current_calibration_method.tex": {
+      "sha256": "79f44199cec4e7f965913d0b6332ca252a617939226d8a25db9cb87f25662b88",
+      "bytes": 2436
+    },
+    "paper_assets/current_data_integrity.tex": {
+      "sha256": "3fc7630976c17e5f5e1508c2fdd9a799326d0376bf5dbe8115f06a6388a10e91",
+      "bytes": 1749
+    },
+    "paper.tex": {
+      "sha256": "a7ced783832089996232fe96e9cf062cc5f313af4bb0336eb52058fedd4f447e",
+      "bytes": 28691
+    }
+  },
+  "generator_sha256": "34c51381978e202d5e1a3ccf6edf4b0211b538d29c79e2bd3e67f60794e3b6d5",
+  "generator_sources": {
+    "paper_assets/generate_current_assets.py": "34c51381978e202d5e1a3ccf6edf4b0211b538d29c79e2bd3e67f60794e3b6d5",
+    "paper_assets/generate_pooled_assets.py": "34c51381978e202d5e1a3ccf6edf4b0211b538d29c79e2bd3e67f60794e3b6d5",
+    "cmapss-predictive-maintenance/scripts/generate_pooled_paper_assets.py": "e2a90dabd551181adf7e46d4cce696ba5b3e2b72501dd78ec6dbb3472b683713"
+  },
+  "output_sha256": {
+    "current_run_macros.tex": "580a848f9bfb7e8b086d838a2c989ab9c37f29724b89ff3d4d0868584aff4051",
+    "current_results_tables.tex": "7a1d7ee5387bbbf323ad11b0e5a4abfe8ed6b7c619a9eed8f23926263c2baa69",
+    "current_pooled_clean.pdf": "2d0105af5bd22b2d3a8dc5db6c29d85f6a7e270011efdf16e2c3710f1d3727d5",
+    "current_pooled_clean.png": "102d8dbe663dd0478ab699aab532f72628a6fba6524aad69a629962269c9a756",
+    "current_pooled_faults.pdf": "db65cac3e1e90f4f408be69d7521e49f290672b1ff0adf49ff5e50bc8c4b167a",
+    "current_pooled_faults.png": "e3098fe1fac1b8e7d1640d53193d0faf869f9a66bdab1e005f43a24a1c1326cc",
+    "current_pooled_calibration.pdf": "4d886797dad89a99649725ef7b383c06019d22d0d3a0fd82f4b7d01f8d0ae3b6",
+    "current_pooled_calibration.png": "2359f4b93869ac6d8dd5656ce1c805d30573571f5756f366c364e249077d152b",
+    "current_pooled_engine179.pdf": "8fc6bf3d99bd6125c171c7f8da476ae849a4508acae322dbe431e33d05cb51f0",
+    "current_pooled_engine179.png": "40b55311c0162f570f833bcf15de5733edb6a0884beef6ce1e419ad2679d8ef4",
+    "current_abstract.tex": "9fce009178b1eec1da1acd01d5a83fe53b12f1ecd834235c3f3b116e8810ccb0",
+    "current_refinement_summary.tex": "bc01fef8781f49a479c585b67ce760ff8da0ab08dd5aed5da8eda2e194e565c4",
+    "current_results_section.tex": "e021998371fad7edad392d03bd9c4e9c14955b86da8942a00054f048344cec7b",
+    "current_conclusion.tex": "6bbca7bf5f7213d4ad6b5558ae18b040ab8e194cabfc2ce24d6f401378470789"
+  },
+  "model_weights_retrained": true,
+  "independent_training_seeds": 1,
+  "calibration_policy": "observable_scaled_engine_max",
+  "limitations": [
+    "Reused internal and official tests remain exploratory.",
+    "Corruption realizations are not training seeds.",
+    "Coverage assumptions are unverified under fleet/censoring/corruption shift.",
+    "Case diagnostics do not establish physical fault causes."
+  ]
+}

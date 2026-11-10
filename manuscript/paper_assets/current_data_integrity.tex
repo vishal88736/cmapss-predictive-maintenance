@@ -1,0 +1,26 @@
+The shared model receives only normalized operating settings, observed sensors,
+availability and the observed-history mask. Engine IDs, subset labels, future
+readings, true RUL and simulated altered-entry masks are excluded from inference.
+Related-channel fault histories are prefix-consistent: appending future rows does
+not alter an earlier corruption realization or select onset by eventual failure.
+
+The four original training files define the engine-disjoint fit/selection/
+calibration/internal-test groups in Table~\ref{tab:pooled_partitions}. Scaler,
+raw-unit fault scales and repair support use fitting engines only. Fitting-engine
+OOF features exclude their held fold from temporary fitting and inner selection.
+Predictor refinement uses fitting engines; every clean/source/NASA, mixed/stuck
+and tail-selection check uses held selection engines. Calibration engines enter
+only after that choice is fixed.
+
+New artifacts use fresh directories and retain their source SHA-256. Resuming an
+interrupted refinement requires matching source, recipe and implementation.
+Current detector audits bind the actual deployed thresholds and detector state;
+the earlier detector operating point remains historical metadata. Recovery
+proofs bind the full declared context matrix, selection IDs and sensor-repair
+state. Calibration binds the final model/configuration and its separate scale
+scope. Strict reload rejects stale or mismatched records.
+
+Validation-only development runs block official test/RUL and saved test-result
+reads. These checks document within-run separation. Earlier internal and
+official test cases have already informed development; their later evaluation
+remains exploratory and is not an untouched independent generalization test.

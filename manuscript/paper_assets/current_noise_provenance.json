@@ -1,0 +1,46 @@
+{
+  "created_at_utc": "2026-11-09T21:35:22.661022+00:00",
+  "scope": "Generated from saved measurements only; no training, inference or recalibration.",
+  "run": "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified",
+  "bundle_sha256": "577cf22aec575a40b611c992b87fa3bf57f3a66c2f2f73a66ede3957e3459457",
+  "noise_run": "artifacts/noise_benchmark_full",
+  "noise_protocol": "additive-gaussian-dropout-v1",
+  "inputs": {
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/official_benchmark_metrics.csv": {
+      "sha256": "e05dd74a4f6c7c7ed1ca3a0660c610c65bb1f12263761e9e9b95992f71034066",
+      "bytes": 443691
+    },
+    "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified/internal_test_10pct_metrics.csv": {
+      "sha256": "0472cb5eea879d88c58ff7f1f67520f05a0171835370039cb1fc24c006adc1db",
+      "bytes": 443923
+    },
+    "cmapss-predictive-maintenance/artifacts/noise_benchmark_full/noise_metrics.csv": {
+      "sha256": "c233df0bd909a782482b320668dd499df67bcbc05db7ef3ab4a481bf31a5106b",
+      "bytes": 32561
+    },
+    "cmapss-predictive-maintenance/artifacts/noise_benchmark_full/manifest.json": {
+      "sha256": "3009dcdb12189847c839aa8a9f14f7c339c78e578c82e7042072cd6c97b8a338",
+      "bytes": 1851
+    }
+  },
+  "outputs": {
+    "current_noise_macros.tex": "e064a719c2a5e18ccf7ac80250218b42e7def1ac11176277a6cf4c675114bb50",
+    "current_noise_section.tex": "7aa134ffd178e269ee4769adbd0cf1f5b0df66fd56f320cfec234235b3c7aeca",
+    "current_noise_curves.pdf": "94efd994072226947caf62203f39cf105f88a1e5eab85ceb496afc1235335cff",
+    "current_noise_curves.png": "e4447c8001ddaa55e6ab9141c525c8051f652bef256136f5dcba3304724cfae7",
+    "current_noise_figure.tex": "ea93d5ab99e4a8d3b59be24551cc041d9ba8039f85ae5b009a78782214028c06"
+  },
+  "literature_values_are_transcribed_not_recomputed": true,
+  "literature_sources": {
+    "hybrid_cnn_gru": "1787574110586-178711702.pdf, Table 4",
+    "partial_sensor_failure": "1787574110595-209939890.pdf, Table 4",
+    "trans_d3": "1787574864583-423798354.pdf, Table 7"
+  },
+  "ranking_scope": "Third-party baselines in the TRANS-D3 table only; proposed rows excluded.",
+  "positions": {
+    "FD001": 6,
+    "FD002": 1,
+    "FD003": 3,
+    "FD004": 1
+  }
+}

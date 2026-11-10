@@ -1,0 +1,34 @@
+{
+  "source_snapshot": "cmapss-predictive-maintenance/docs/results/full_20261025T211530540186Z",
+  "run": "full_20261025T211530540186Z",
+  "figures": [
+    "01_test_rmse.pdf",
+    "02_predicted_vs_actual.pdf",
+    "03_validation_curves.pdf",
+    "04_recovery_acceptance.pdf",
+    "05_fault_robustness.pdf",
+    "06_interval_coverage.pdf",
+    "07_detector_validation.pdf",
+    "08_correction_gain.pdf",
+    "09_sensor_error_contributions.pdf",
+    "00_results_overview.pdf"
+  ],
+  "tables": "results_tables.tex",
+  "scope": "Reformatted existing plots and exact numeric tables only; no retraining or new experiments",
+  "asset_sha256": {
+    "00_results_overview.pdf": "507d5b12a8fe37188bc635119ee5fec7e06d9ab5896d52cd5c70316a433af5a1",
+    "01_test_rmse.pdf": "68c4e5e9b5b062c7097385d0a4d3b97662038d2951dd3c83d12b795756fc5d50",
+    "02_predicted_vs_actual.pdf": "bdb7a6c47b48d11d3ec7b498c979de9e223da71894fb0f067a1cf65b5f47b242",
+    "03_validation_curves.pdf": "fdfaa016d403f658b5f86f61b516e31151b2e34b583d6691ddbd4022ad7d5c00",
+    "04_recovery_acceptance.pdf": "953f5333e9bff5e9e180022c87d2e1303866068245128569bc67968734cd204f",
+    "05_fault_robustness.pdf": "6587718e18855e8737233f8fba3821b26d042d4b9ce568986905175fa4f15e0a",
+    "06_interval_coverage.pdf": "dd386f1b8f2ed344e95927480eb560f36c25c138ab1f4a56aafc51f0183e43f5",
+    "07_detector_validation.pdf": "7cbdfc45a66bc0f41802ac897a6405f3007953e40bee45925716eb61da4ee832",
+    "08_correction_gain.pdf": "0d3bd542c1bea5a224deddf32e11ec54c2987059bf63bdf4f143318fc8a835cc",
+    "09_sensor_error_contributions.pdf": "4cb15dcc7e8cf563ca68269488818e0d8c109833a9b7073375f600e0784ca016"
+  },
+  "source_manifest_sha256": "6931fabd1bf563c71a0b91bd0f62bb961ddc477488e4f516708d8bc8135a53af",
+  "tables_sha256": "edeee04cbae3e123eaff2ec44927139fe83b3fc3136cf37c3b9e64bd849c3a61",
+  "generator_sha256": "f3c2d202dd6210152913dced73b926ca01525c690246dc177101d2d697a805fa",
+  "source_result_hashes_verified": 61
+}

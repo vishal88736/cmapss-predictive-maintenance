@@ -1,0 +1,91 @@
+\subsection{\textbf{Broadband Sensor Noise and Channel Dropout}}
+\newcommand{\CurrentNoiseTable}{%
+\begin{table*}[!t]
+\caption{Frozen-artifact accuracy under broadband sensor noise and channel dropout.}
+\label{tab:noise}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrr}
+\toprule
+Noise & Official RMSE & Official MAE & Cov. (\%) & Internal RMSE & Cov. (\%) \\
+\midrule
+none & 12.01 & 8.52 & 99.3 & 13.30 & 99.0 \\
+5\% & 12.05 & 8.60 & 99.3 & 13.37 & 99.0 \\
+10\% & 12.17 & 8.62 & 99.2 & 13.55 & 99.2 \\
+20\% & 12.37 & 8.76 & 98.9 & 13.84 & 98.8 \\
+30\% & 12.67 & 9.04 & 99.0 & 14.29 & 98.8 \\
+50\% & 13.68 & 9.97 & 99.2 & 15.44 & 97.9 \\
+2\% cells & 11.96 & 8.56 & 99.6 & 13.37 & 99.0 \\
+5\% cells & 12.23 & 8.77 & 99.2 & 13.54 & 99.0 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Rows 1--6 add per-channel Gaussian noise; the level is a multiple of the fitting-only within-regime sensor scale. Rows 7--8 instead drop whole cells at zero added noise. Settings and speed commands are unperturbed. Noise is applied after model freeze; no weight, threshold, corrector or interval radius was fitted on these levels. Coverage is empirical clean endpoint/prefix coverage under the frozen radius, not a new guarantee.\end{minipage}
+\end{table*}
+}
+
+\CurrentNoiseTable
+The structured protocol models failures confined to related channels. Real
+acquisition also carries broadband noise on every channel at once and occasional
+missing cells. We therefore add an independent measurement layer that perturbs
+raw sensor readings before the frozen fitting-only scaler: per-channel Gaussian
+noise scaled to the within-regime sensor scale, plus independent cell dropouts.
+Settings and speed commands stay untouched, and the layer is applied only after
+freeze, so no weight, detector threshold, corrector or interval radius was fitted
+on it. Levels are nested: one per-engine draw is scaled, so a sweep is paired
+rather than resampled.
+
+Table~\ref{tab:noise} shows graceful degradation. At 20\% of the within-regime
+scale, pooled official RMSE moves from \CurrentNoiseOfficialZero{} to
+\CurrentNoiseOfficialTwenty{} cycles, an increase of 3.0\%, and empirical coverage
+remains \CurrentNoiseCoverageTwenty{}\%. At 50\% it is
+\CurrentNoiseOfficialFifty{} cycles with \CurrentNoiseCoverageFifty{}\% coverage.
+The internal partition follows the same pattern, from \CurrentNoiseHeldoutZero{}
+to \CurrentNoiseHeldoutFifty{}. Modest dropout is not harmful: dropping 2\% of
+cells leaves pooled official RMSE at \CurrentNoiseDropoutTwo{}, and 5\% gives
+\CurrentNoiseDropoutFive{}. These are sensitivity measurements of one frozen
+artifact, not a claim that any level matches a measured sensor specification.
+
+\subsection{\textbf{Comparison with the Supplied Studies}}
+\newcommand{\CurrentLiteratureTable}{%
+\begin{table*}[!t]
+\caption{Reported C-MAPSS results at the 125-cycle target against the supplied studies.}
+\label{tab:literature}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrr}
+\toprule
+Model & FD001 & FD002 & FD003 & FD004 \\
+\midrule
+GRACE-RUL (one shared model, no subset label) & \textbf{11.93} & \textbf{11.77} & \textbf{11.25} & \textbf{12.57} \\
+Hybrid CNN--GRU (reported, five repeats) & 13.1 & 16.8 & 14.5 & 18.9 \\
+TRANS-D3 (reported) & 1.66 & 13.23 & 6.61 & 12.26 \\
+Best third-party baseline (reported) & 10.61 (STAR) & 13.47 (STAR) & 10.71 (STAR) & 15.86 (DLformer) \\
+Reported value ahead of GRACE-RUL & TRANS-D3 1.66 & none & TRANS-D3 6.61 & TRANS-D3 12.26 \\
+Position among third-party baselines (proposed row excluded) & 6 & 1 & 3 & 1 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Reported columns are transcribed from the cited papers and are not recomputed here. Rank counts only third-party baselines, so a proposed row cannot define its own benchmark. The penultimate row names every reported value still ahead of this work, including the TRANS-D3 proposed row where it applies; on FD004 this work is second overall, not first. This work is one shared model without a subset label, whereas the compared entries are subset-specific. Official C-MAPSS tests were inspected in earlier development, so all values are exploratory rather than a pristine holdout.\end{minipage}
+\end{table*}
+}
+
+\CurrentLiteratureTable
+Table~\ref{tab:literature} transcribes the reported values of the supplied
+studies. This work is first on FD002 among every reported row, second on FD004
+behind the reported TRANS-D3 value of 12.26, third on FD003 among third-party
+baselines, and \CurrentRankFdA{}th on FD001. It is not first on FD004 and no
+such claim is made. The hybrid CNN--GRU study reports
+13.1, 16.8, 14.5 and 18.9, so this model improves every subset by 1.17 to 6.33
+cycles at a comparable 125-cycle target.
+
+Two qualifications matter more than the ordering. First, the compared entries are
+subset-specific models, whereas this work uses one shared model without a subset
+label, so the comparison is not budget-matched in the harder direction. Second,
+the TRANS-D3 FD001 and FD003 values of 1.66 and 6.61 lie far below every
+third-party entry in the same table, whose best values are \CurrentBestFdA{}
+and \CurrentBestFdB{}; no capped C-MAPSS protocol in this study reaches them, so they are
+retained for completeness rather than treated as a reproducible target. The
+partial-failure study reports a single pooled fault-conditioned RMSE of
+\CurrentPaperBOfficial{} with unspecified channel coverage and severity, which is
+not decomposable by subset and is therefore not entered as a per-subset cell.

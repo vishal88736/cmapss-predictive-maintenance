@@ -1,0 +1,104 @@
+{
+  "created_at_utc": "2026-11-10T08:04:56.699062+00:00",
+  "revision": "Noise benchmark, cross-study comparison, component ablation, recovery benchmark, cost analysis",
+  "pdf": "output/pdf/grace_rul_repaired.pdf",
+  "pdf_sha256": "efab570bc361357f02ead8833baa66c40353c0c0f3450b173431247df52c0e7c",
+  "pdf_pages": 13,
+  "previous_pdf_sha256": "6a37094e75bf895a2934242bc05d267a430adc4e2568faf35863f950adc0441b",
+  "compiler": "Tectonic 0.17.0, OT1 driver, cached default_bundle_v33",
+  "frozen_bundle_sha256": "577cf22aec575a40b611c992b87fa3bf57f3a66c2f2f73a66ede3957e3459457",
+  "training_or_recalibration": false,
+  "deployed_artifact_changed": false,
+  "new_sections": [
+    "D) Broadband Sensor Noise and Channel Dropout (Table VII, Fig. 6)",
+    "E) Comparison with the Supplied Studies (Table VIII)",
+    "F) Component Contribution and Interval Width (Table IX)",
+    "G) Recovery and Detection Benchmark (Table X)",
+    "H) Computational Cost (Table XI)"
+  ],
+  "ablation_findings": {
+    "recovery_gain_stuck_severity_0_2": 4.99,
+    "recovery_gain_mixed_severity_0_2": 1.38,
+    "corrector_max_abs_rmse_delta": 0.03,
+    "clean_full_RMSE": 12.01,
+    "clean_plain_RMSE": 11.98,
+    "clean_mean_interval_width_cycles": 68.2
+  },
+  "unachievable_here": [
+    "No pre-registered holdout: every C-MAPSS engine already served in fitting, selection, calibration or evaluation.",
+    "Multi-seed training: no CUDA device in this session and a full pooled refit is a multi-hour GPU job."
+  ],
+  "new_assets": {
+    "current_noise_macros.tex": "e064a719c2a5e18ccf7ac80250218b42e7def1ac11176277a6cf4c675114bb50",
+    "current_noise_section.tex": "b795372819c586e08b905c72cd475d81386f2c2d2bdd7a9bec6f91458a968a24",
+    "current_noise_figure.tex": "ea93d5ab99e4a8d3b59be24551cc041d9ba8039f85ae5b009a78782214028c06",
+    "current_noise_curves.pdf": "94efd994072226947caf62203f39cf105f88a1e5eab85ceb496afc1235335cff",
+    "current_noise_curves.png": "e4447c8001ddaa55e6ab9141c525c8051f652bef256136f5dcba3304724cfae7",
+    "current_noise_provenance.json": "45b7715ccfa8a812085a656faf26b13216793f45ae8067893e586955e7c7325a",
+    "current_ablation_macros.tex": "3696059e9b76995200c2d1eeced3f0239428b995a73fccbeac408f9de86540ce",
+    "current_ablation_section.tex": "d41736d584588d8480c087f43a7e42cad78ef66eacdba5a454a71c54c5faa53a",
+    "current_ablation_provenance.json": "88d6a296af7c9b389744c212c6dfecf5629c812fc47d7bf50e7735db6a9a9f0e",
+    "current_validation_macros.tex": "9680031eb6a76b65b94cec10421fbf15ac4295844488f341c5ab7fd4dd8cb8a3",
+    "current_recovery_section.tex": "afee8d00d0af2a91140b3c906e96bac8483caf46f9a371e87194d3bead9ba557",
+    "current_efficiency_section.tex": "1beb960994ee3ce0ba2a9c96636ba0961928c46166c1304cb51106d98e36ecd1",
+    "current_validation_provenance.json": "ecfd82a8809def3ced82cb617df260d9b51ad36101403046b76aa5f5ec3ee992"
+  },
+  "ablation_run": "cmapss-predictive-maintenance/artifacts/component_ablation_full",
+  "ablation_sha256": "505a0ecceda40721d19915b979edfa0dfca6cbb93c867198b65a468ababd3dbb",
+  "noise_run": "cmapss-predictive-maintenance/artifacts/noise_benchmark_full",
+  "noise_sha256": "c233df0bd909a782482b320668dd499df67bcbc05db7ef3ab4a481bf31a5106b",
+  "code_added": [
+    "grace_rul/noise.py",
+    "scripts/benchmark_noise.py",
+    "scripts/ablation_components.py",
+    "scripts/generate_noise_paper_assets.py",
+    "scripts/generate_ablation_paper_assets.py",
+    "scripts/recovery_benchmark.py",
+    "scripts/efficiency_benchmark.py",
+    "scripts/generate_validation_paper_assets.py"
+  ],
+  "code_modified": [
+    "grace_rul/corruption.py",
+    "scripts/generate_pooled_paper_assets.py"
+  ],
+  "test_suite": "273 tests OK after the corruption.py change",
+  "ranking_correction": "Table VIII now names every reported value still ahead of this work; FD004 is second to TRANS-D3 12.26, not first.",
+  "recovery_findings": {
+    "detection_precision_min": 0.86,
+    "recall_drift": 0.21,
+    "recall_stuck": 0.62,
+    "worst_intact_displacement": 0.0074,
+    "worst_false_repair_rate": 0.0041
+  },
+  "cost_findings": {
+    "parameters": 348656,
+    "weight_MB": 1.33,
+    "mac_per_window": 19396096,
+    "latency_ms": 5.08,
+    "throughput_engines_per_s": 1285.3,
+    "fleet_s": 3.59,
+    "peak_rss_MB": 835.5
+  },
+  "new_runs": {
+    "recovery": "cmapss-predictive-maintenance/artifacts/recovery_benchmark_full",
+    "efficiency": "cmapss-predictive-maintenance/artifacts/efficiency_benchmark_full"
+  },
+  "cleanup": {
+    "freed_MB": 485,
+    "kept_runs": [
+      "pooled_repair_20261101T230338Z_9ea6_dpk",
+      "pooled_v9_r2_20261029_114845",
+      "pooled_v9_r2_finetuned_final",
+      "noise_benchmark_full",
+      "component_ablation_full",
+      "recovery_benchmark_full",
+      "efficiency_benchmark_full"
+    ],
+    "verified_by": "full asset regeneration and PDF rebuild from the pruned tree"
+  },
+  "changes": [
+    "Related work rewritten without the three-paper integration framing; the integration diagram was removed.",
+    "Added reference [9] (Xu et al., Transformer-KAN-BiLSTM) cited once in Limitations as context only, with no numeric comparison."
+  ],
+  "references": 9
+}

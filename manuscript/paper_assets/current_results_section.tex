@@ -1,0 +1,34 @@
+\subsection{\textbf{Clean Accuracy and Evaluation Units}}
+\CurrentPooledResultsTable
+\CurrentComparisonTable
+\CurrentRawResultsTable
+\CurrentAdaptiveCalibrationTable
+The frozen shared model achieves official clean capped RMSE 12.0080 and MAE 8.5224 cycles across 707 endpoint engines. Original pooled revision 2 had RMSE 12.1062 on the reused official benchmark. Internal clean RMSE is 13.2974; its 484 prefixes belong to 71 engines and are dependent within engine. These comparisons describe completed runs, rather than an independent confirmatory test.
+The immediate preserved fine-tuned source had official RMSE 11.9415; Table~\ref{tab:current_comparison} reports that comparison as well, including any regressions. Validation guards and the held selection-tail objective fixed the current model before these test values were read.
+\begin{figure*}[tp]\centering
+\includegraphics[width=\textwidth]{paper_assets/current_pooled_clean.pdf}
+\caption{Clean capped RMSE for the frozen current model, its immediate preserved source, and original pooled revision 2. Each is one training-seed pipeline; no across-training-seed uncertainty is implied. Internal values use a fixed causal prefix grid.}\label{fig:pooled_clean}
+\end{figure*}
+\subsection{\textbf{Structured-Fault Robustness}}
+At severity 0.2, mean pooled official stuck-fault RMSE is 15.0767 cycles over three corruption realizations. Averaging all declared stuck severities and realizations instead gives 17.6636; these summaries must not be interchanged. Fig.~\ref{fig:pooled_faults} exposes severity dependence on the pooled fleet and the multi-regime subsets. Corruptions preserve original RUL labels and do not represent recorded aircraft sensor incidents.
+\begin{figure*}[tp]\centering
+\includegraphics[width=\textwidth]{paper_assets/current_pooled_faults.pdf}
+\par\smallskip
+\includegraphics[width=\textwidth]{paper_assets/current_pooled_calibration.pdf}
+\caption{Top: official capped-target robustness under structured faults; curves are means and bands are sample standard deviations over three corruption replicates of one frozen model, not training seeds or fleet confidence intervals. Bottom: empirical clean coverage and mean interval width grouped by observable predicted RUL. Grouped coverage is descriptive and does not establish conditional coverage for a realized engine or life stage. The simultaneous calibration score spans all bins for each engine.}\label{fig:pooled_faults}\label{fig:pooled_calibration}
+\end{figure*}
+\subsection{\textbf{Calibration and Healthy-Sensor Impact}}
+Empirical clean coverage is 99.29\% on official endpoints and 98.97\% on internal prefixes. Internal whole-engine coverage over the evaluated grid is 95.77\%, a different unit from prefix coverage and from every-cycle trajectory coverage. Nominal coverage is 90\%, conditional on the stated exchangeability assumptions. The complete recovery matrix is accepted with worst pooled-context intact original-linear RMSE 0.00983; this is a sensor displacement diagnostic, not a RUL accuracy guarantee.
+\input{paper_assets/current_noise_section.tex}
+\input{paper_assets/current_noise_figure.tex}
+\input{paper_assets/current_ablation_section.tex}
+\input{paper_assets/current_recovery_section.tex}
+\input{paper_assets/current_efficiency_section.tex}
+\subsection{\textbf{Previously Inspected FD004 Engine 179}}
+This case is a post-freeze diagnostic, excluded from the current selection objective. At cycle 240 the model predicts 7.440 against capped target 125 (raw RUL 195); its capped interval is [0.000, 22.581]. At cycle 270 it predicts 114.282. Aggregate coverage cannot establish that this particular prediction is accurate or covered. Raw settings at cycles 240 and 245 are [10.0067, 0.2516, 100] and [20.0005, 0.7, 100], respectively, and correspond to different fitted regimes. Consequently the earlier identical-setting physical-excursion explanation is unsupported. The local branch uses 30 cycles and the Transformer uses 70; a local-window-only causal explanation is also incomplete.
+\begin{figure*}[tp]\centering
+\includegraphics[width=\textwidth]{paper_assets/current_pooled_engine179.pdf}
+\caption{Observed failure-case trajectory and operating-setting changes. Predictions and intervals are saved outputs of the frozen current artifact. Colors in the lower panel identify fitted regimes; raw settings are not ground truth about a physical fault cause.}\label{fig:pooled_engine179}
+\end{figure*}
+\subsection{\textbf{Evidence and Reproducibility Boundaries}}
+Point metrics, counts and coverage are recomputed from saved predictions. All manuscript numbers and plotted values are tied to a single completed run, with input/output SHA-256 hashes in \texttt{paper\_assets/current\_provenance.json}; the noise benchmark and the cross-study transcription carry their own record in \texttt{paper\_assets/current\_noise\_provenance.json}. Asset generation performs no model fitting or inference. The source model and earlier audit directories remain preserved; new artifacts use fresh directories. This does not restore independence of previously inspected internal or official benchmark cases. Matched reproductions of the compared methods, repeated training seeds and external fleet validation remain separate requirements.

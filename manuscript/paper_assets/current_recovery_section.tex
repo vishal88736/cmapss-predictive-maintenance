@@ -1,0 +1,46 @@
+\subsection{\textbf{Recovery and Detection Benchmark}}
+\newcommand{\CurrentRecoveryTable}{%
+\begin{table*}[!t]
+\caption{Post-freeze recovery and detection benchmark by fault family.}
+\label{tab:recovery}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llrrrrrr}
+\toprule
+Family & Scope & F1 & Recall & Reconst. MAE & Intact disp. & False repair (\%) & Cov. (\%) \\
+\midrule
+clean & none & n/a & n/a & n/a & 0.002 & 0.1 & 99.3 \\
+intermittent & missing & n/a & n/a & 0.24 & 0.002 & 0.0 & 99.2 \\
+outage & missing & n/a & n/a & 0.23 & 0.000 & 0.0 & 99.1 \\
+block & missing & n/a & n/a & 0.23 & 0.001 & 0.0 & 99.2 \\
+noise & finite & 0.37 & 0.23 & 0.15 & 0.003 & 0.1 & 99.2 \\
+bias & finite & 0.46 & 0.30 & 0.22 & 0.003 & 0.1 & 99.2 \\
+drift & finite & 0.35 & 0.21 & 0.16 & 0.003 & 0.1 & 99.2 \\
+stuck & finite & 0.72 & 0.62 & 1.08 & 0.007 & 0.4 & 96.8 \\
+mixed & finite & 0.57 & 0.41 & 0.43 & 0.004 & 0.1 & 98.7 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Detection is measured on finite altered entries at severity 0.2, averaged over three corruption replicates; it is undefined for missing-entry families, which the availability mask handles instead, so those cells are not applicable rather than zero. Reconstruction and intact displacement are in original-linear sensor units. False repair is the fraction of healthy entries flagged. Nothing was tuned on these values and the deployed artifact is unchanged.\end{minipage}
+\end{table*}
+}
+
+\CurrentRecoveryTable
+Table~\ref{tab:recovery} opens the recovery black box. Detection is deliberately
+conservative: precision exceeds 0.86 in every finite fault family, but recall
+reaches only 0.21 for
+drift, so most altered entries are left for the generator rather than
+explicitly flagged. stuck is the easiest family (F1
+0.72) and stuck the hardest to
+reconstruct (1.08 original-linear
+MAE), consistent with a held value being ambiguous rather than out of range.
+
+Healthy-sensor protection holds: the worst intact displacement is
+0.007 original-linear units and the worst false-repair fraction is
+0.4\%. Missing-entry families show no detector activity because
+they are routed by the availability mask, and their reconstruction column measures
+imputation of genuinely absent cells. These numbers also expose the stated
+limitation directly: an in-support finite fault with a low detection score is
+under-repaired, and coverage falls to
+96.8\% for stuck faults.
+Detection thresholds were frozen before these values were read.

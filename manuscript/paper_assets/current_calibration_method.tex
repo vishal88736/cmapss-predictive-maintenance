@@ -1,0 +1,43 @@
+The repaired policy uses observable scaling with one score per independent
+engine, following the split-conformal construction~\cite{angelopoulos2021gentle}.
+For each target convention $h\in\{c,r\}$, first fit a positive scale
+$a_h(\widehat y)$ on selection engines, independently of calibration. Observable
+predicted-RUL bins are $[0,35)$, $[35,75)$, $[75,125)$ and $[125,\infty)$.
+Within a supported bin, the scale is selection RMSE, with a positive one-cycle
+floor. An unsupported scale bin uses global selection RMSE. This is a fixed
+normalizer, not a replacement for an unsupported calibration quantile.
+True RUL is used as a selection/calibration label, never to choose an inference
+bin.
+
+After freezing weights, support, thresholds, corrector and scales, evaluate all
+observed prefixes of each of the \CurrentCalibrationEngines{} reserved engines.
+For capped $y^{(c)}=\min(r,125)$ and raw $y^{(r)}=r$, form
+\begin{equation}
+ s_e^{(h)}=\max_{t\in\mathcal P_e}
+ \frac{|y_{e,t}^{(h)}-\widehat y_{e,t}|}{a_h(\widehat y_{e,t})}.
+ \label{eq:normalized_engine_score}
+\end{equation}
+The maximum spans every bin visited by an engine, so dependent prefixes and
+observable bins do not become extra independent calibration samples.
+With $n$ engines, $\alpha=0.1$ and $k=\lceil(n+1)(1-\alpha)\rceil$, define
+\begin{equation}
+ q_h=\begin{cases}s_{(k)}^{(h)},&k\leq n,\\+\infty,&k>n.\end{cases}
+\end{equation}
+At inference, the observable adaptive interval is
+\begin{equation}
+ C_h(\widehat y)=\big[\max\{0,\widehat y-q_h a_h(\widehat y)\},\,
+ \widehat y+q_h a_h(\widehat y)\big].
+ \label{eq:adaptive_engine_interval}
+\end{equation}
+An unbounded rank remains unbounded; it is not silently replaced by a finite
+global radius. The saved quantile, independent scale-engine scope, bin radii
+and model/configuration fingerprint are checked during loading.
+
+For each target convention separately, exchangeable complete engine
+trajectories and a model/normalizer fixed independently of calibration give
+marginal simultaneous-prefix coverage across all observable bins. This is an
+adaptation of split conformal to engine-level scores, not a claim of conditional
+coverage for an individual engine or a life stage. It gives no joint guarantee
+across capped and raw contracts. Censoring, fleet shift and added faults need
+not preserve the assumptions. Empirical official endpoint coverage and
+internal prefix/whole-engine coverage are reported separately.

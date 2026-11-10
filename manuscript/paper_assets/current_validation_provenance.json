@@ -1,0 +1,36 @@
+{
+  "created_at_utc": "2026-11-09T21:35:23.276156+00:00",
+  "scope": "Generated from saved measurements; no training, inference or selection.",
+  "run": "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified",
+  "bundle_sha256": "577cf22aec575a40b611c992b87fa3bf57f3a66c2f2f73a66ede3957e3459457",
+  "recovery_run": "artifacts/recovery_benchmark_full",
+  "efficiency_run": "artifacts/efficiency_benchmark_full",
+  "inputs": {
+    "cmapss-predictive-maintenance/artifacts/recovery_benchmark_full/recovery_summary.csv": {
+      "sha256": "f5c40a1410a7aa186d325ebfe0d88470a7ae60569c36432e7270922867876a55",
+      "bytes": 1267
+    },
+    "cmapss-predictive-maintenance/artifacts/recovery_benchmark_full/recovery_metrics.csv": {
+      "sha256": "779051aa1196a7caa297171002c6c2639a650ded2da5ebd005d1355c92816d42",
+      "bytes": 6407
+    },
+    "cmapss-predictive-maintenance/artifacts/efficiency_benchmark_full/efficiency_metrics.csv": {
+      "sha256": "974989da5ac104ee4d7da2b45ce800b5be751fa600d05dad6cf4a6c9dd087551",
+      "bytes": 983
+    },
+    "cmapss-predictive-maintenance/artifacts/efficiency_benchmark_full/manifest.json": {
+      "sha256": "06af8c62d90285fa32714b4237b483841b599627585030a6d03b1988a8ddfa5a",
+      "bytes": 845
+    }
+  },
+  "outputs": {
+    "current_validation_macros.tex": "9680031eb6a76b65b94cec10421fbf15ac4295844488f341c5ab7fd4dd8cb8a3",
+    "current_recovery_section.tex": "afee8d00d0af2a91140b3c906e96bac8483caf46f9a371e87194d3bead9ba557",
+    "current_efficiency_section.tex": "1beb960994ee3ce0ba2a9c96636ba0961928c46166c1304cb51106d98e36ecd1"
+  },
+  "post_freeze_diagnostic": true,
+  "deployed_artifact_changed": false,
+  "recovery_worst_intact_displacement": 0.0074,
+  "recovery_worst_false_repair_rate": 0.00406,
+  "latency_is_machine_specific": true
+}
