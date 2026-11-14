@@ -15,7 +15,7 @@ def _rmse(error):
     return float(np.sqrt(np.mean(np.square(error))))
 
 
-def fit_plateau_calibration(records, *, knee=100., alphas=None,
+def fit_plateau_calibration(records, *, knee=100., knees=None, alphas=None,
                             max_capped_increase=0.0, cap=125.):
     """Choose a one-parameter monotone stretch for the censored RUL plateau.
 
@@ -33,25 +33,31 @@ def fit_plateau_calibration(records, *, knee=100., alphas=None,
     capped = np.minimum(raw, float(cap))
     if alphas is None:
         alphas = np.linspace(0., 2., 41)
-    best = None
-    for alpha in np.asarray(alphas, float):
-        adjusted = prediction + float(alpha) * np.maximum(prediction - float(knee), 0.)
-        raw_rmse = _rmse(adjusted - raw)
-        capped_rmse = _rmse(adjusted - capped)
-        row = {"alpha": float(alpha), "knee": float(knee),
-               "raw_RMSE": raw_rmse, "capped_RMSE": capped_rmse,
-               "N": int(len(frame))}
-        if best is None:
-            best = row
-        # Prefer the largest raw-error reduction that respects the capped guard.
-        baseline_capped = _rmse(prediction - capped)
-        if capped_rmse <= baseline_capped + float(max_capped_increase):
-            if (row["raw_RMSE"] < best["raw_RMSE"] - 1e-9 or
-                    (abs(row["raw_RMSE"] - best["raw_RMSE"]) <= 1e-9 and row["alpha"] < best["alpha"])):
-                best = row
+    if knees is not None:
+        knee_candidates = [float(k) for k in knees]
+    elif isinstance(knee, (list, tuple, np.ndarray)):
+        knee_candidates = [float(k) for k in knee]
+    else:
+        knee_candidates = [float(knee)]
+    baseline_capped = _rmse(prediction - capped)
     baseline_raw = _rmse(prediction - raw)
+    best = {"alpha": 0.0, "knee": float(knee_candidates[0]), "raw_RMSE": baseline_raw,
+            "capped_RMSE": baseline_capped, "N": int(len(frame))}
+    for k in knee_candidates:
+        for alpha in np.asarray(alphas, float):
+            adjusted = prediction + float(alpha) * np.maximum(prediction - float(k), 0.)
+            raw_rmse = _rmse(adjusted - raw)
+            capped_rmse = _rmse(adjusted - capped)
+            row = {"alpha": float(alpha), "knee": float(k),
+                   "raw_RMSE": raw_rmse, "capped_RMSE": capped_rmse,
+                   "N": int(len(frame))}
+            # Prefer the largest raw-error reduction that respects the capped guard.
+            if capped_rmse <= baseline_capped + float(max_capped_increase):
+                if (row["raw_RMSE"] < best["raw_RMSE"] - 1e-9 or
+                        (abs(row["raw_RMSE"] - best["raw_RMSE"]) <= 1e-9 and (row["alpha"] < best["alpha"] or row["knee"] > best["knee"]))):
+                    best = row
     best["baseline_raw_RMSE"] = baseline_raw
-    best["baseline_capped_RMSE"] = _rmse(prediction - capped)
+    best["baseline_capped_RMSE"] = baseline_capped
     best["method"] = "monotone_plateau_stretch"
     best["selection_scope"] = "held validation engines only"
     return best

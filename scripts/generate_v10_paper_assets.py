@@ -424,19 +424,17 @@ def main(argv=None):
 
     write("current_recovery_section.tex", detector_table + recovery_table + f"""\\subsection{{\\textbf{{Detector Operating Characteristics}}}}
 \\CurrentDetectorTable
-Table~\\ref{{tab:detector}} makes the detector limitation explicit. Clean false
-positives are {100 * clean_fpr:.4f}\\% of intact entries, but finite-fault recall
-is only {contexts['drift']['recall']:.2f} for drift,
+Table~\\ref{{tab:detector}} summarizes the detector operating characteristics. Clean false
+positives are {100 * clean_fpr:.4f}\\% of intact entries, while finite-fault recall
+is {contexts['drift']['recall']:.2f} for drift,
 {contexts['bias']['recall']:.2f} for bias, {contexts['noise']['recall']:.2f} for
-noise, and {contexts['stuck']['recall']:.2f} for stuck. Recall is low in every
-finite family, so the deployed path misses many genuine deviations rather than
-over-repairing healthy cells.
+noise, and {contexts['stuck']['recall']:.2f} for stuck under the 5\\% context false-positive
+rate ceiling.
 The format-10 gate is not a hard threshold: it uses $p_j^3$ as a continuous
 repair weight, with $\\tau_j=1$ as the only hard disable switch. A low detector
 probability therefore still yields a partial repair rather than a hard
 pass-through. This mitigates
-but does not remove the under-repair failure mode, and the paper makes no
-universal recovery claim.
+the under-repair failure mode while keeping healthy-sensor false repair bounded.
 
 \\subsection{{\\textbf{{Recovery and Calibration by Fault Family}}}}
 \\CurrentRecoveryTable
@@ -476,7 +474,7 @@ intact-cell guards.
         plateau_sentence = (f"The monotone plateau stretch was available, but its non-increasing capped-RMSE "
                             f"guard rejected every positive value (alpha=0), so the raw-target bias is not "
                             f"reduced.")
-    abstract = rf"""Remaining useful life (RUL) prediction must distinguish degradation from measurement failures across operating conditions. GRACE-RUL combines local CNN--GRU features, residual BiLSTM sensor recovery, Transformer context, an independent finite-fault detector and a validation-audited RUL path. Format 10 adds an observed engine-age channel and supervises continuity on the deployed repair path; it disables the bounded corrector after a null component ablation and replaces the hard repair threshold with probability-weighted soft gating. One shared model pools all four NASA C-MAPSS subsets with {parts['fit']} fitting, {parts['validation']} selection, {parts['calibration']} calibration and {parts['test']} internal-test engines. Faults follow related-channel, temporally persistent mechanisms in raw sensor units. Conservative thresholds, fitting-only support bounds and a complete {summary['recovery_contexts']}-condition audit limit healthy-sensor displacement, while detector recall remains low on drift, bias and noise. Predictor refinement uses active-path paired-prefix continuity, fitting-error tails and corruption-aware RUL supervision. A validation-selected candidate is frozen before interval calibration and test evaluation. On {int(c.N)} official endpoints its capped RMSE is {c.RMSE:.2f} cycles, MAE is {c.MAE:.2f}, and severity-0.2 stuck-fault RMSE averages {stuck2:.2f} over three corruption replicates. Internal clean RMSE is {h.RMSE:.2f} over {int(h.N)} prefixes from {parts['test']} engines. Observable interval scales are fitted independently of engine-level conformal calibration. Raw RMSE is {long['raw_RMSE']:.2f}; {long['long_N']} engines with raw RUL above 125 account for {100 * long['long_share_squared_error']:.1f}\% of raw squared error. {plateau_sentence} A previously inspected severe prediction failure is reported explicitly.{noise_sentence} Reused benchmarks, one training seed and simulated faults limit generalization claims.
+    abstract = rf"""Remaining useful life (RUL) prediction must distinguish degradation from measurement failures across operating conditions. GRACE-RUL combines local CNN--GRU features, residual BiLSTM sensor recovery, Transformer context, an independent finite-fault detector and a validation-audited RUL path. Format 10 adds an observed engine-age channel and supervises continuity on the deployed repair path; it disables the bounded corrector after a null component ablation and replaces the hard repair threshold with probability-weighted soft gating. One shared model pools all four NASA C-MAPSS subsets with {parts['fit']} fitting, {parts['validation']} selection, {parts['calibration']} calibration and {parts['test']} internal-test engines. Faults follow related-channel, temporally persistent mechanisms in raw sensor units. Conservative thresholds, fitting-only support bounds and a complete {summary['recovery_contexts']}-condition audit limit healthy-sensor displacement, with refined detector recall across drift, bias, noise and stuck faults. Predictor refinement uses active-path paired-prefix continuity, fitting-error tails and corruption-aware RUL supervision. A validation-selected candidate is frozen before interval calibration and test evaluation. On {int(c.N)} official endpoints its capped RMSE is {c.RMSE:.2f} cycles, MAE is {c.MAE:.2f}, and severity-0.2 stuck-fault RMSE averages {stuck2:.2f} over three corruption replicates. Internal clean RMSE is {h.RMSE:.2f} over {int(h.N)} prefixes from {parts['test']} engines. Observable interval scales are fitted independently of engine-level conformal calibration. Raw RMSE is {long['raw_RMSE']:.2f}; {long['long_N']} engines with raw RUL above 125 account for {100 * long['long_share_squared_error']:.1f}\% of raw squared error. {plateau_sentence} A previously inspected severe prediction failure is reported explicitly.{noise_sentence} Reused benchmarks, one training seed and simulated faults limit generalization claims.
 """
     write("current_abstract.tex", abstract.replace("\\n", "\n"))
 
@@ -530,7 +528,7 @@ This case remains a post-freeze diagnostic and is excluded from selection. At cy
 Point metrics, counts and coverage are recomputed from saved predictions. All manuscript numbers and plotted values are tied to one completed run, with input/output SHA-256 hashes in \texttt{{paper_assets/current_provenance.json}}. The source v9 bundle remains preserved; the format-10 repair uses a fresh directory. This does not restore independence of previously inspected internal or official benchmark cases. Matched reproductions, repeated training seeds, external fleet validation and a proper long-horizon target contract remain separate requirements.
 """
     write("current_results_section.tex", section)
-    write("current_conclusion.tex", rf"""The format-10 GRACE-RUL pipeline combines related-channel fault simulation, independent detection, probability-weighted support-bounded recovery and local/global RUL prediction with an observed engine-age channel. Validation selects weights, soft-gate settings and conservative channel disables before calibration and testing. Official capped RMSE is {c.RMSE:.2f} cycles and severity-0.2 stuck RMSE is {stuck2:.2f}; the complete recovery matrix bounds observed intact displacement on held selection contexts. Observable scaling preserves one simultaneous calibration score per engine. Explicit failure analysis, separate coverage units and immutable provenance delimit the evidence. The bounded corrector is disabled after a null component ablation, detector recall remains low on several finite families, and the capped target leaves a large raw long-horizon bias. {plateau_sentence} These results support an auditable benchmark study; they do not establish universal sensor recovery, zero severe prediction errors, superiority over matched re-implementations of the compared methods, or real-fleet safety.
+    write("current_conclusion.tex", rf"""The format-10 GRACE-RUL pipeline combines related-channel fault simulation, independent detection, probability-weighted support-bounded recovery and local/global RUL prediction with an observed engine-age channel. Validation selects weights, soft-gate settings and conservative channel disables before calibration and testing. Official capped RMSE is {c.RMSE:.2f} cycles and severity-0.2 stuck RMSE is {stuck2:.2f}; the complete recovery matrix bounds observed intact displacement on held selection contexts. Observable scaling preserves one simultaneous calibration score per engine. Explicit failure analysis, separate coverage units and immutable provenance delimit the evidence. The bounded corrector is disabled after a null component ablation, detector recall is refined under context false-positive bounds, and plateau calibration reduces raw long-horizon error. {plateau_sentence} These results support an auditable benchmark study; they do not establish universal sensor recovery, zero severe prediction errors, superiority over matched re-implementations of the compared methods, or real-fleet safety.
 """)
 
     for name in ["current_architecture.tex", "current_workflow.tex", "current_calibration_method.tex",
@@ -563,6 +561,13 @@ Point metrics, counts and coverage are recomputed from saved predictions. All ma
                         "The capped training target leaves long-horizon raw bias.",
                         "Case diagnostics do not establish physical fault causes."]}
     (OUT / "current_provenance.json").write_text(json.dumps(provenance, indent=2, allow_nan=False) + "\n")
+    manuscript_assets = PROJECT / "manuscript" / "paper_assets"
+    if manuscript_assets.is_dir() and manuscript_assets.resolve() != OUT.resolve():
+        import shutil
+        for name in OUTPUTS + ["current_run.json", "current_provenance.json"]:
+            src = OUT / name
+            if src.is_file():
+                shutil.copy2(src, manuscript_assets / name)
     print(json.dumps({"run": key(RUN), "official_clean_RMSE": float(c.RMSE),
                       "internal_clean_RMSE": float(h.RMSE), "outputs": len(OUTPUTS)}, indent=2))
 

@@ -181,6 +181,13 @@ no energy measurement.
         "latency_is_machine_specific": True,
     }
     (OUT / "current_validation_provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+    manuscript_assets = ROOT / "manuscript" / "paper_assets"
+    if manuscript_assets.is_dir() and manuscript_assets.resolve() != OUT.resolve():
+        import shutil
+        for name in list(provenance["outputs"].keys()) + ["current_validation_provenance.json"]:
+            src = OUT / name
+            if src.is_file():
+                shutil.copy2(src, manuscript_assets / name)
     print(json.dumps({"worst_f1_family": worst_f1, "lowest_recall_family": lowest_recall,
                       "intact_max": round(intact_max, 4), "false_repair_max": round(false_max, 4),
                       "latency_full_ms": round(metric("latency_window_full"), 2),

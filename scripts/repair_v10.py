@@ -40,7 +40,8 @@ from grace_rul.checkpoints import save_checkpoint
 from grace_rul.config import (CORRUPTION_PROTOCOL, FEATURE_COLUMNS, POOLED_REPAIR_ARCHITECTURE,
                               POOLED_REPAIR_FORMAT_VERSION, SUBSETS)
 from grace_rul.data import WindowDataset, load_subset
-from grace_rul.detection import audit_deployed_thresholds
+from grace_rul.detection import (audit_deployed_thresholds, refine_bypassed_detector,
+                                  select_deployment_thresholds)
 from grace_rul.model import GraceRUL, age_from_cycles, expand_predictor_for_age
 from grace_rul.pooled import (MODEL_KEY, _annotate, _point_rows, load_pooled_training,
                               sha, validate_pooled_entry, write_json)
@@ -82,13 +83,13 @@ def _evaluate(model, dataset, config, thresholds):
 
 def _score(report, tail):
     return (0.5 * report["RMSE"] + 0.25 * report.get("mixed_RMSE", report["RMSE"]) +
-            0.25 * report.get("stuck_RMSE", report["RMSE"]) + 0.1 * tail)
+            0.25 * report.get("stuck_RMSE", report["RMSE"]) + 0.2 * tail)
 
 
 def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4,
              device="auto", soft_temperature=1.0, soft_power=3.0, branch_weight=0.1,
-             prefix_weight=1.0, active_weight=1.0, clean_weight=0.25,
-             tail_weight=0.1, max_windows=None, final_evaluation=True):
+             prefix_weight=1.0, active_weight=1.0, clean_weight=1.0,
+             tail_weight=0.1, max_windows=None, final_evaluation=True, seed_override=None):
     root = Path(project_root)
     source = Path(source_bundle_path).resolve()
     output = Path(output_dir).resolve()
@@ -111,7 +112,9 @@ def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4
         "pooled_evaluate_official": False, "calibration_policy": "observable_scaled_engine_max",
         "deployment_audit_revision": 1,
     })
-    seed_all(int(entry["selected_seed"]), config["cpu_threads"])
+    seed = int(entry["selected_seed"]) if seed_override is None else int(seed_override)
+    seed_all(seed, config["cpu_threads"])
+    config["seed"] = seed
 
     frame, hashes = load_pooled_training(root / "data", config)
     if hashes != entry["source_hashes"]:
@@ -133,6 +136,31 @@ def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4
     model.config["plateau_calibration"] = None
     model.eval()
 
+    # Refine the bypassed detector under the strict 5% false-positive rate guard,
+    # boosting recall across drift, bias, noise, stuck, and mixed families.
+    print("Refining detector on fitting and validation engines...", flush=True)
+    model.repair_enabled.fill_(False)
+    detector_config = deepcopy(config)
+    detector_config.update({
+        "detector_refinement_epochs": 4,
+        "detector_refinement_patience": 2,
+        "maximum_batches": 25,
+    })
+    detector_history = refine_bypassed_detector(model, fit, val, scaler, detector_config, seed)
+    model.repair_enabled.fill_(bool(entry.get("repair_selected", True)))
+    initial_th = detector_history.attrs["audit"]["thresholds"]
+    model.finite_repair_thresholds.zero_()
+    deployed_thresholds = select_deployment_thresholds(
+        model, val, scaler, config, int(config["validation_seed"]), minimum=initial_th
+    )
+    model.finite_repair_thresholds.copy_(torch.as_tensor(deployed_thresholds, device=dev, dtype=torch.float32))
+    print(f"Deployed detector thresholds refined: min={min(deployed_thresholds):.3f} max={max(deployed_thresholds):.3f} "
+          f"active={(np.array(deployed_thresholds) < 1.0).sum()}/21 channels", flush=True)
+    post_audit = audit_deployed_thresholds(model, val, scaler, config, int(config["validation_seed"]))
+    for fam in ["drift", "bias", "noise", "stuck", "mixed"]:
+        m = post_audit["selected"]["contexts"].get(fam, {})
+        print(f"  {fam} recall={m.get('recall', 0.):.3f} F1={m.get('F1', 0.):.3f}", flush=True)
+
     # Baseline is the unmodified source model. The candidate must improve or
     # preserve every declared validation slice.
     source_model = loaded[MODEL_KEY]["model"].to(dev)
@@ -146,9 +174,9 @@ def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4
     print(f"Source validation clean={ref_clean['RMSE']:.4f} mixed={ref_mixed['RMSE']:.4f} "
           f"stuck={ref_stuck['RMSE']:.4f} tail={ref_tail:.4f}", flush=True)
 
-    init_clean, init_records = _evaluate(model, clean_val, config, entry["thresholds"])
-    init_mixed, _ = _evaluate(model, mixed_val, config, entry["thresholds"])
-    init_stuck, _ = _evaluate(model, stuck_val, config, entry["thresholds"])
+    init_clean, init_records = _evaluate(model, clean_val, config, deployed_thresholds)
+    init_mixed, _ = _evaluate(model, mixed_val, config, deployed_thresholds)
+    init_stuck, _ = _evaluate(model, stuck_val, config, deployed_thresholds)
     init_tail = engine_tail_score(init_records)
     print(f"Initial v10 validation clean={init_clean['RMSE']:.4f} mixed={init_mixed['RMSE']:.4f} "
           f"stuck={init_stuck['RMSE']:.4f} tail={init_tail:.4f}", flush=True)
@@ -194,7 +222,8 @@ def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4
             prefix_loss = prefix_consistency_loss(model, batch, active["base"])
             branch_loss = branch_objective(model, active, batch["target"])
             agreement = F.mse_loss(active["local_prediction"] / scale, active["global_prediction"] / scale)
-            tail_loss = tail_rul_loss(active["prediction"], batch["target"], scale=scale, fraction=.1)
+            tail_loss = 0.5 * (tail_rul_loss(active["prediction"], batch["target"], scale=scale, fraction=.1) +
+                               tail_rul_loss(clean["prediction"], batch["target"], scale=scale, fraction=.1))
             loss = (clean_weight * clean_loss + active_weight * active_loss +
                     prefix_weight * prefix_loss + 0.1 * branch_loss +
                     branch_weight * agreement + tail_weight * tail_loss)
@@ -206,9 +235,9 @@ def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4
             totals["branch"] += float(agreement.detach()); totals["tail"] += float(tail_loss.detach())
             batches += 1
         scheduler.step()
-        clean_rep, clean_records = _evaluate(model, clean_val, config, entry["thresholds"])
-        mixed_rep, _ = _evaluate(model, mixed_val, config, entry["thresholds"])
-        stuck_rep, _ = _evaluate(model, stuck_val, config, entry["thresholds"])
+        clean_rep, clean_records = _evaluate(model, clean_val, config, deployed_thresholds)
+        mixed_rep, _ = _evaluate(model, mixed_val, config, deployed_thresholds)
+        stuck_rep, _ = _evaluate(model, stuck_val, config, deployed_thresholds)
         tail = engine_tail_score(clean_records)
         guards = {
             "clean_rmse": clean_rep["RMSE"] <= ref_clean["RMSE"] * 1.01,
@@ -239,19 +268,19 @@ def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4
     model.eval()
     pd.DataFrame(history).to_csv(output / "validation_history.csv", index=False)
 
-    # Fit the plateau stretch on selection engines only, then freeze it before
-    # touching calibration or test engines.
-    _, clean_records = _evaluate(model, clean_val, config, entry["thresholds"])
-    plateau = fit_plateau_calibration(clean_records, knee=100., max_capped_increase=0.0)
+    # Fit the plateau stretch on selection engines only, searching multiple knees,
+    # then freeze it before touching calibration or test engines.
+    _, clean_records = _evaluate(model, clean_val, config, deployed_thresholds)
+    plateau = fit_plateau_calibration(clean_records, knee=[100., 105., 110., 115., 120.], max_capped_increase=0.01)
     config["plateau_calibration"] = plateau
     model.config["plateau_calibration"] = plateau
-    print(f"Plateau calibration: alpha={plateau['alpha']:.3f} raw {plateau['baseline_raw_RMSE']:.3f}"
+    print(f"Plateau calibration: knee={plateau['knee']:.1f} alpha={plateau['alpha']:.3f} raw {plateau['baseline_raw_RMSE']:.3f}"
           f" -> {plateau['raw_RMSE']:.3f}, capped {plateau['baseline_capped_RMSE']:.3f}"
           f" -> {plateau['capped_RMSE']:.3f}", flush=True)
 
-    clean_rep, clean_records = _evaluate(model, clean_val, config, entry["thresholds"])
-    mixed_rep, _ = _evaluate(model, mixed_val, config, entry["thresholds"])
-    stuck_rep, _ = _evaluate(model, stuck_val, config, entry["thresholds"])
+    clean_rep, clean_records = _evaluate(model, clean_val, config, deployed_thresholds)
+    mixed_rep, _ = _evaluate(model, mixed_val, config, deployed_thresholds)
+    stuck_rep, _ = _evaluate(model, stuck_val, config, deployed_thresholds)
     tail = engine_tail_score(clean_records)
     final = {"clean": clean_rep, "mixed": mixed_rep, "stuck": stuck_rep, "tail": tail,
              "plateau": plateau, "best_epoch": best["epoch"]}
@@ -278,7 +307,7 @@ def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4
     upgraded = deepcopy(entry)
     upgraded["state_dict"] = {key: value.detach().cpu() for key, value in model.state_dict().items()}
     upgraded["training_config"] = deepcopy(config)
-    upgraded["thresholds"] = entry["thresholds"]
+    upgraded["thresholds"] = deployed_thresholds
     upgraded["calibration"] = calibration
     upgraded["correction_bound"] = 0.
     upgraded["repair_selected"] = bool(model.repair_enabled)
@@ -326,7 +355,7 @@ def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4
         ds = WindowDataset(internal_frame, scaler, config, mode="heldout",
                            seed=config["validation_seed"] + 100000 + replicate,
                            family=family, severity=severity)
-        report, predictions = evaluate(model, ds, config, fault_thresholds=entry["thresholds"],
+        report, predictions = evaluate(model, ds, config, fault_thresholds=deployed_thresholds,
                                        capture_recovery_tails=True)
         predictions = _annotate(predictions, engines)
         for protocol, name in [(f"capped_{config['train_rul_cap']:g}", "capped"), ("official_uncapped", "raw")]:
@@ -359,7 +388,7 @@ def finetune(project_root, source_bundle_path, output_dir, *, epochs=12, lr=2e-4
         ds = WindowDataset(official_frame, scaler, config, mode="test",
                            seed=config["validation_seed"] + 100000 + replicate,
                            family=family, severity=severity, truths=truths)
-        report, predictions = evaluate(model, ds, config, fault_thresholds=entry["thresholds"],
+        report, predictions = evaluate(model, ds, config, fault_thresholds=deployed_thresholds,
                                        capture_recovery_tails=True)
         predictions = _annotate(predictions, official_engines)
         for protocol, name in [(f"capped_{config['train_rul_cap']:g}", "capped"), ("official_uncapped", "raw")]:
@@ -447,10 +476,11 @@ def main():
     parser.add_argument("--branch-weight", type=float, default=0.1)
     parser.add_argument("--prefix-weight", type=float, default=1.0)
     parser.add_argument("--active-weight", type=float, default=1.0)
-    parser.add_argument("--clean-weight", type=float, default=0.25)
+    parser.add_argument("--clean-weight", type=float, default=1.0)
     parser.add_argument("--tail-weight", type=float, default=0.1)
     parser.add_argument("--max-windows", type=int, default=None)
     parser.add_argument("--no-final-evaluation", action="store_true")
+    parser.add_argument("--seed", type=int, default=None, help="Override training seed")
     args = parser.parse_args()
     if args.report_only:
         if args.output_dir is None:
@@ -466,7 +496,7 @@ def main():
              branch_weight=args.branch_weight, prefix_weight=args.prefix_weight,
              active_weight=args.active_weight, clean_weight=args.clean_weight,
              tail_weight=args.tail_weight, max_windows=args.max_windows,
-             final_evaluation=not args.no_final_evaluation)
+             final_evaluation=not args.no_final_evaluation, seed_override=args.seed)
 
 
 if __name__ == "__main__":

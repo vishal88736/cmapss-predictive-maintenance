@@ -147,6 +147,11 @@ class RepairV10(unittest.TestCase):
         self.assertEqual(refused["alpha"], 0.)
         np.testing.assert_allclose(apply_plateau_calibration(bad.prediction, refused), bad.prediction)
 
+        # Multi-knee search chooses best valid candidate
+        multi = fit_plateau_calibration(good, knee=[100., 110.], max_capped_increase=0.)
+        self.assertGreater(multi["alpha"], 0.)
+        self.assertIn(multi["knee"], [100., 110.])
+
     def test_active_prefix_loss_reads_the_deployed_input_path(self):
         config = model_config(prefix_consistency_loss_weight=1., prefix_consistency_path="clean",
                               finite_repair_gate="soft", soft_gate_power=3., age_feature=True)

@@ -1,36 +1,36 @@
 {
-  "created_at_utc": "2026-11-14T07:14:53.383811+00:00",
+  "created_at_utc": "2026-11-14T08:37:47.741840+00:00",
   "scope": "Generated from saved measurements; no training, inference or selection.",
-  "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114",
-  "bundle_sha256": "e599e6e25002bec42993766e069ebadd746a386e8508b345fc82062779680e99",
-  "recovery_run": "artifacts/recovery_v10_20261114",
-  "efficiency_run": "artifacts/efficiency_v10_20261114",
+  "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114_repaired",
+  "bundle_sha256": "9b2b86ef0236351e1d4d68b6a9ea8a5909515ad454060129e1259ad8293aa2a8",
+  "recovery_run": "artifacts/recovery_benchmark_v10",
+  "efficiency_run": "artifacts/efficiency_benchmark_v10",
   "inputs": {
-    "cmapss-predictive-maintenance/artifacts/recovery_v10_20261114/recovery_summary.csv": {
-      "sha256": "644219dae777b22715a742f5ccda32785e01b6fe42dc86820dc15b160aced2b0",
-      "bytes": 1263
+    "cmapss-predictive-maintenance/artifacts/recovery_benchmark_v10/recovery_summary.csv": {
+      "sha256": "f9ee349d3d950ebb1a958c2f87a2446aafd4c8807d913b862491c59e31779d78",
+      "bytes": 1254
     },
-    "cmapss-predictive-maintenance/artifacts/recovery_v10_20261114/recovery_metrics.csv": {
-      "sha256": "939efc5d2235de8cb608736c29e062ec4fea25961a0f12459f9d606d056516ec",
-      "bytes": 6398
+    "cmapss-predictive-maintenance/artifacts/recovery_benchmark_v10/recovery_metrics.csv": {
+      "sha256": "1e016f982f3e6eec0a96cbb89b592bbd0ffe93c760e88af1e4a31c134b62d032",
+      "bytes": 6374
     },
-    "cmapss-predictive-maintenance/artifacts/efficiency_v10_20261114/efficiency_metrics.csv": {
-      "sha256": "e6843b520e51d3534c8d8c533af0088aa9ce668721df447eb528adb8367440eb",
+    "cmapss-predictive-maintenance/artifacts/efficiency_benchmark_v10/efficiency_metrics.csv": {
+      "sha256": "d2e77482b56177f54ebe474c477a5a1e1980048573a1a40dfefe72bebc2220d8",
       "bytes": 983
     },
-    "cmapss-predictive-maintenance/artifacts/efficiency_v10_20261114/manifest.json": {
-      "sha256": "4a3d993a6f3230bb7b57c5a6d1c9e4461cee808a005419cabd1002077ec3853e",
-      "bytes": 825
+    "cmapss-predictive-maintenance/artifacts/efficiency_benchmark_v10/manifest.json": {
+      "sha256": "8ef097b166d7420c5567076c966c8d2d76bb8bc171ce8590ec18e21824041469",
+      "bytes": 820
     }
   },
   "outputs": {
-    "current_validation_macros.tex": "b201afe329f4d8a37c5f82e7fe37c2c03b749af92ee302e1f4e3016d9a663796",
-    "current_recovery_section.tex": "77786a862504281938f6ff9341d6e2248cfc0b4fdaa3fd7f2d59872b2ac2554b",
-    "current_efficiency_section.tex": "89ef3f7e59b1ecf32ee001299ff109925d3b5e1ea03f69e33febc13083d298c7"
+    "current_validation_macros.tex": "cb0ff9a7c63214e49b872ef03ffac9b2b1ca919fdaac49d5e2d7f8dbe4a32867",
+    "current_recovery_section.tex": "4df06decbed2e6cb4e0d5f4dae9f5a30d631d68912982ac69aef3dc3e96ff5b5",
+    "current_efficiency_section.tex": "69841b11556622e297e3bb7ed56713bded1376447d2f883237207a48bdb2aea0"
   },
   "post_freeze_diagnostic": true,
   "deployed_artifact_changed": false,
-  "recovery_worst_intact_displacement": 0.0204,
-  "recovery_worst_false_repair_rate": 0.00406,
+  "recovery_worst_intact_displacement": 0.0197,
+  "recovery_worst_false_repair_rate": 0.005,
   "latency_is_machine_specific": true
 }

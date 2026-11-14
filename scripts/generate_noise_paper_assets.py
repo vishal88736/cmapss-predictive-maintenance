@@ -305,6 +305,13 @@ not decomposable by subset and is therefore not entered as a per-subset cell.
         "positions": rank,
     }
     (OUT / "current_noise_provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+    manuscript_assets = ROOT / "manuscript" / "paper_assets"
+    if manuscript_assets.is_dir() and manuscript_assets.resolve() != OUT.resolve():
+        import shutil
+        for name in list(provenance["outputs"].keys()) + ["current_noise_provenance.json"]:
+            src = OUT / name
+            if src.is_file():
+                shutil.copy2(src, manuscript_assets / name)
 
     print(json.dumps({"ours": {s: round(v, 2) for s, v in ours.items()}, "rank": rank,
                       "best_third_party": {s: round(best[s], 2) for s in SUBSETS},

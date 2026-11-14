@@ -160,6 +160,13 @@ is a post-freeze diagnostic and the deployed artifact is unchanged.
         "clean_mean_interval_width": round(width, 2),
     }
     (OUT / "current_ablation_provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+    manuscript_assets = ROOT / "manuscript" / "paper_assets"
+    if manuscript_assets.is_dir() and manuscript_assets.resolve() != OUT.resolve():
+        import shutil
+        for name in list(provenance["outputs"].keys()) + ["current_ablation_provenance.json"]:
+            src = OUT / name
+            if src.is_file():
+                shutil.copy2(src, manuscript_assets / name)
     print(json.dumps({"stuck_gains": {k: round(v, 2) for k, v in gains.items()},
                       "mixed_gain": round(mixed_gain, 2),
                       "corrector_max_delta": round(corrector_delta, 2),

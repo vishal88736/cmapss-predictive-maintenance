@@ -9,14 +9,14 @@
 \toprule
 Noise & Official RMSE & Official MAE & Cov. (\%) & Internal RMSE & Cov. (\%) \\
 \midrule
-none & 11.08 & 7.19 & 98.4 & 12.07 & 99.0 \\
-5\% & 11.17 & 7.24 & 98.7 & 12.31 & 98.8 \\
-10\% & 11.00 & 7.21 & 99.0 & 12.14 & 98.3 \\
-20\% & 11.38 & 7.59 & 98.6 & 12.47 & 98.6 \\
-30\% & 11.98 & 8.12 & 98.3 & 13.03 & 98.6 \\
-50\% & 13.64 & 9.52 & 97.0 & 14.36 & 97.1 \\
-2\% cells & 10.94 & 6.98 & 98.7 & 12.00 & 99.0 \\
-5\% cells & 11.10 & 7.18 & 98.9 & 11.96 & 98.8 \\
+none & 10.50 & 6.96 & 99.7 & 11.80 & 99.4 \\
+5\% & 11.20 & 7.56 & 99.7 & 12.45 & 99.4 \\
+10\% & 10.97 & 7.29 & 99.7 & 12.42 & 99.4 \\
+20\% & 11.44 & 7.58 & 99.4 & 12.62 & 99.4 \\
+30\% & 11.89 & 7.98 & 99.3 & 13.11 & 99.4 \\
+50\% & 13.44 & 9.34 & 99.0 & 14.54 & 98.8 \\
+2\% cells & 10.66 & 6.95 & 99.7 & 11.87 & 99.4 \\
+5\% cells & 10.84 & 7.13 & 99.7 & 12.00 & 99.4 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
@@ -37,7 +37,7 @@ rather than resampled.
 
 Table~\ref{tab:noise} shows graceful degradation. At 20\% of the within-regime
 scale, pooled official RMSE moves from \CurrentNoiseOfficialZero{} to
-\CurrentNoiseOfficialTwenty{} cycles, an increase of 2.8\%, and empirical coverage
+\CurrentNoiseOfficialTwenty{} cycles, an increase of 9.0\%, and empirical coverage
 remains \CurrentNoiseCoverageTwenty{}\%. At 50\% it is
 \CurrentNoiseOfficialFifty{} cycles with \CurrentNoiseCoverageFifty{}\% coverage.
 The internal partition follows the same pattern, from \CurrentNoiseHeldoutZero{}
@@ -57,7 +57,7 @@ artifact, not a claim that any level matches a measured sensor specification.
 \toprule
 Model & FD001 & FD002 & FD003 & FD004 \\
 \midrule
-GRACE-RUL (one shared model, no subset label) & \textbf{10.13} & \textbf{11.94} & \textbf{9.80} & \textbf{10.99} \\
+GRACE-RUL (one shared model, no subset label) & \textbf{10.04} & \textbf{10.92} & \textbf{9.35} & \textbf{10.67} \\
 Hybrid CNN--GRU (reported, five repeats) & 13.1 & 16.8 & 14.5 & 18.9 \\
 TRANS-D3 (reported) & 1.66 & 13.23 & 6.61 & 12.26 \\
 Best third-party baseline (reported) & 10.61 (STAR) & 13.47 (STAR) & 10.71 (STAR) & 15.86 (DLformer) \\
@@ -73,7 +73,7 @@ Position among third-party baselines (proposed row excluded) & 1 & 1 & 1 & 1 \\
 \CurrentLiteratureTable
 Table~\ref{tab:literature} transcribes the reported values of the supplied
 studies. Among the third-party baselines transcribed in Table~\ref{tab:literature}, this work has the lowest RMSE on every subset. Its FD002 and FD004 values are also first among every reported row. TRANS-D3's proposed FD001 and FD003 values remain lower, so no first place overall is claimed. The hybrid CNN--GRU study reports
-13.1, 16.8, 14.5 and 18.9, so this model improves every subset by 2.97 to 7.91
+13.1, 16.8, 14.5 and 18.9, so this model improves every subset by 3.06 to 8.23
 cycles at a comparable 125-cycle target.
 
 Two qualifications matter more than the ordering. First, the compared entries are

@@ -1,33 +1,33 @@
 {
-  "created_at_utc": "2026-11-14T07:14:52.906882+00:00",
+  "created_at_utc": "2026-11-14T08:37:42.066395+00:00",
   "scope": "Generated from saved measurements only; no training, inference or recalibration.",
-  "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114",
-  "bundle_sha256": "e599e6e25002bec42993766e069ebadd746a386e8508b345fc82062779680e99",
-  "noise_run": "artifacts/noise_v10_20261114_full",
+  "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114_repaired",
+  "bundle_sha256": "9b2b86ef0236351e1d4d68b6a9ea8a5909515ad454060129e1259ad8293aa2a8",
+  "noise_run": "artifacts/noise_benchmark_v10",
   "noise_protocol": "additive-gaussian-dropout-v1",
   "inputs": {
-    "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114/official_benchmark_metrics.csv": {
-      "sha256": "5e08cbe6ec7782aea87287a29a7ce678c962521471b96687a17bce717877c29e",
-      "bytes": 25217
+    "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114_repaired/official_benchmark_metrics.csv": {
+      "sha256": "0c3b72401b6294b750290227a7ef315ef50cc28a6b7ecbb48fe0fdb57b047b00",
+      "bytes": 25195
     },
-    "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114/internal_test_10pct_metrics.csv": {
-      "sha256": "50d6ad1f0cb221910e5fd819aa97453f6fcd0067c77cd3491c3f59680031e698",
-      "bytes": 25007
+    "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114_repaired/internal_test_10pct_metrics.csv": {
+      "sha256": "9cf6007eb0bbac19e08715e6d3cd5904bb9b1fba885b9a0a364d4150770044ab",
+      "bytes": 24890
     },
-    "cmapss-predictive-maintenance/artifacts/noise_v10_20261114_full/noise_metrics.csv": {
-      "sha256": "e9d2e25e064e78250fde15f4842693f4ab1b92667f2fd9d869e9b14436e1487c",
-      "bytes": 32346
+    "cmapss-predictive-maintenance/artifacts/noise_benchmark_v10/noise_metrics.csv": {
+      "sha256": "2cbfccfb15248b2a0a717454dfc556d016e129907c920dd491b687d5947f0c63",
+      "bytes": 32142
     },
-    "cmapss-predictive-maintenance/artifacts/noise_v10_20261114_full/manifest.json": {
-      "sha256": "46ed5cf3e80a33a94330020011d34e066e035923bf2c490d09dacd4663b68674",
-      "bytes": 1894
+    "cmapss-predictive-maintenance/artifacts/noise_benchmark_v10/manifest.json": {
+      "sha256": "9a437d86d0e94526701324dfc17abb0b620cf90220ad473c6d243f561e01a0b6",
+      "bytes": 1888
     }
   },
   "outputs": {
-    "current_noise_macros.tex": "9eeaaf142c2460a7fb8d3fcfd8ea48abed2cf3cd8fdd97b62f40d3387b668f91",
-    "current_noise_section.tex": "f4590edb59ee163cf810e8e2f46b8fd789330ea9bdbddd128d9f9418d4ea8941",
-    "current_noise_curves.pdf": "557b8ebc363a13aa3f471559fe82d792a4554aec88eddc9016de27c1a3e1ac98",
-    "current_noise_curves.png": "f7f2d4de0c0e5b5f2bcd7d54b28f7ebb03680a78bf8b30a5864cdd68c048e83b",
+    "current_noise_macros.tex": "991c05d0226e1f3a31bf3f1ff5f3b177aae4a0a8307b206a9a6482a1e6f102fb",
+    "current_noise_section.tex": "c0a5f45748fff3b67fd124d5e47afcbfd213f5621a2acead5a483f0eb0b42b98",
+    "current_noise_curves.pdf": "f418112fc7578e3818a45a9a2146e21c872de6d08eb7dd48ae04412e390b83ba",
+    "current_noise_curves.png": "6ceb685ac178250dc2e8763ea16c903681478715cbecc788d4ad7e6032e170a6",
     "current_noise_figure.tex": "96bd4bf62f11e8a73dfb07714bf58a07706a4084cf3b2731730bd98c69fa1045"
   },
   "literature_values_are_transcribed_not_recomputed": true,

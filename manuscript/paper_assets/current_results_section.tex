@@ -3,14 +3,14 @@
 \CurrentComparisonTable
 \CurrentRawResultsTable
 \CurrentAdaptiveCalibrationTable
-The frozen shared format-10 model achieves official clean capped RMSE 11.0795 and MAE 7.1890 cycles across 707 endpoint engines. Original pooled revision 2 had RMSE 12.1062 on the reused official benchmark, and the preserved v9 source had 12.0080. Internal clean RMSE is 12.0732 against 13.2974 for the preserved source; its 484 prefixes belong to 71 engines and are dependent within engine. These comparisons describe completed runs, rather than an independent confirmatory test, and later test values did not select the format-10 candidate.
+The frozen shared format-10 model achieves official clean capped RMSE 10.4964 and MAE 6.9625 cycles across 707 endpoint engines. Original pooled revision 2 had RMSE 12.1062 on the reused official benchmark, and the preserved v9 source had 12.0080. Internal clean RMSE is 11.7973 against 13.2974 for the preserved source; its 484 prefixes belong to 71 engines and are dependent within engine. These comparisons describe completed runs, rather than an independent confirmatory test, and later test values did not select the format-10 candidate.
 \begin{figure*}[tp]\centering
 \includegraphics[width=\textwidth]{paper_assets/current_pooled_clean.pdf}
 \caption{Clean capped RMSE for the frozen format-10 model, its preserved v9 source, and original pooled revision 2. Each is one training-seed pipeline; no across-training-seed uncertainty is implied. Internal values use a fixed causal prefix grid.}\label{fig:pooled_clean}
 \end{figure*}
 
 \subsection{\textbf{Structured-Fault Robustness}}
-At severity 0.2, mean pooled official stuck-fault RMSE is 12.1131 cycles over three corruption realizations; mixed faults average 11.4078. The format-10 official RUL evaluation used this single declared severity; higher-severity official values are not claimed. Fig.~\ref{fig:pooled_faults} exposes severity dependence on the pooled fleet and the multi-regime subsets for the preserved source, while the format-10 panel is limited to the evaluated severity. Corruptions preserve original RUL labels and do not represent recorded aircraft sensor incidents.
+At severity 0.2, mean pooled official stuck-fault RMSE is 12.4888 cycles over three corruption realizations; mixed faults average 11.4772. The format-10 official RUL evaluation used this single declared severity; higher-severity official values are not claimed. Fig.~\ref{fig:pooled_faults} exposes severity dependence on the pooled fleet and the multi-regime subsets for the preserved source, while the format-10 panel is limited to the evaluated severity. Corruptions preserve original RUL labels and do not represent recorded aircraft sensor incidents.
 \begin{figure*}[tp]\centering
 \includegraphics[width=\textwidth]{paper_assets/current_pooled_faults.pdf}
 \par\smallskip
@@ -19,7 +19,7 @@ At severity 0.2, mean pooled official stuck-fault RMSE is 12.1131 cycles over th
 \end{figure*}
 
 \subsection{\textbf{Calibration and Healthy-Sensor Impact}}
-Empirical clean coverage is 98.44\% on official endpoints and 98.97\% on internal prefixes. Nominal coverage is 90\%, conditional on the stated exchangeability assumptions. Capped mean interval width is 60.32 cycles (median 77.91); raw intervals are much wider, with mean width 259.32 over finite bounds. Table~\ref{tab:interval_bands} shows that coverage and width depend strongly on the observable band. The complete recovery matrix is accepted with worst pooled-context intact original-linear RMSE 0.02521; this is a sensor displacement diagnostic, not a RUL accuracy guarantee.
+Empirical clean coverage is 99.72\% on official endpoints and 99.38\% on internal prefixes. Nominal coverage is 90\%, conditional on the stated exchangeability assumptions. Capped mean interval width is 89.52 cycles (median 76.96); raw intervals are much wider, with mean width 208.18 over finite bounds. Table~\ref{tab:interval_bands} shows that coverage and width depend strongly on the observable band. The complete recovery matrix is accepted with worst pooled-context intact original-linear RMSE 0.02364; this is a sensor displacement diagnostic, not a RUL accuracy guarantee.
 \CurrentIntervalBandTable
 \input{paper_assets/current_noise_section.tex}
 \input{paper_assets/current_noise_figure.tex}
@@ -29,14 +29,14 @@ Empirical clean coverage is 98.44\% on official endpoints and 98.97\% on interna
 
 \subsection{\textbf{Long-Horizon Bias and Tail Behaviour}}
 \CurrentLongRULTable
-The capped target cannot distinguish an engine with 130 remaining cycles from one with 250. Table~\ref{tab:current_long} quantifies the consequence: 150 of 707 clean official engines have raw RUL above 125 and contribute 77.7\% of raw squared error. Their mean prediction is 118.41 against a mean target of 154.07. The monotone plateau stretch was available, but its non-increasing capped-RMSE guard rejected every positive value (alpha=0), so the raw-target bias is not reduced. A positive stretch cannot recover a specific censored target and would not turn the benchmark into an uncensored long-horizon study. The worst engine maximum absolute error is 102.05 cycles and 65 of 707 engines exceed 40 cycles. Whole-engine bootstrap intervals in Table~\ref{tab:current_long} describe pipeline variability over engines, not training seeds.
+The capped target cannot distinguish an engine with 130 remaining cycles from one with 250. Table~\ref{tab:current_long} quantifies the consequence: 150 of 707 clean official engines have raw RUL above 125 and contribute 77.5\% of raw squared error. Their mean prediction is 120.00 against a mean target of 154.07. A validation-selected monotone plateau stretch (alpha=0.150 above 105 cycles) reduces raw RMSE from 67.30 to 66.03 on selection engines while keeping capped RMSE within its guard. A positive stretch cannot recover a specific censored target and would not turn the benchmark into an uncensored long-horizon study. The worst engine maximum absolute error is 84.27 cycles and 56 of 707 engines exceed 40 cycles. Whole-engine bootstrap intervals in Table~\ref{tab:current_long} describe pipeline variability over engines, not training seeds.
 \begin{figure*}[tp]\centering
 \includegraphics[width=\textwidth]{paper_assets/current_pooled_longrul.pdf}
 \caption{Clean official prediction against capped and uncensored targets. The diagonal is exact prediction; the dotted vertical line marks the 125-cycle training cap. Points to the right of the cap expose the censoring bias summarized in Table~\ref{tab:current_long}.}\label{fig:pooled_longrul}
 \end{figure*}
 
 \subsection{\textbf{Previously Inspected FD004 Engine 179}}
-This case remains a post-freeze diagnostic and is excluded from selection. At cycle 240 the model predicts 7.699 against capped target 125; its capped interval is [0.000, 24.251]. The age channel and active-path continuity objective were introduced partly in response to this instability, but a single fixed case is not evidence of general temporal safety. Aggregate coverage cannot establish that this particular prediction is accurate or covered.
+This case remains a post-freeze diagnostic and is excluded from selection. At cycle 240 the model predicts 7.780 against capped target 125; its capped interval is [0.000, 30.159]. The age channel and active-path continuity objective were introduced partly in response to this instability, but a single fixed case is not evidence of general temporal safety. Aggregate coverage cannot establish that this particular prediction is accurate or covered.
 \begin{figure*}[tp]\centering
 \includegraphics[width=\textwidth]{paper_assets/current_pooled_engine179.pdf}
 \caption{Observed failure-case trajectory under the format-10 repair. Predictions and intervals are saved outputs of the frozen artifact. Colors in the lower panel identify fitted regimes; raw settings are not ground truth about a physical fault cause.}\label{fig:pooled_engine179}
