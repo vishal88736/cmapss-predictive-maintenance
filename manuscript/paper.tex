@@ -367,12 +367,15 @@ guarantee every healthy future sensor or individual RUL prediction. In-support
 moves are bounded, whereas outliers may move inward across fitting support.
 A finite faulty in-support reading can still be under-repaired. Related-channel
 and temporally correlated simulation remains a hypothesis about acquisition
-errors, not measured aircraft fault prevalence. Detector threshold recall remains
-low on drift, bias and noise, so the soft gate mitigates but does not remove
-under-repair. The non-increasing capped-RMSE guard rejected every positive
-long-horizon stretch, leaving the raw-target bias unresolved. The inspected
-FD004 engine 179 still receives a severely low prediction at cycle 240; aggregate
-improvements do not repair that individual failure.
+errors, not measured aircraft fault prevalence. Detector threshold recall was refined under per-source false-positive bounds
+(improving stuck to 0.64, bias to 0.39, and mixed to 0.48), but subtle drift (0.27)
+and noise (0.28) faults remain challenging under the strict 5\% false-positive
+rate ceiling. Multi-knee plateau calibration accepts a positive stretch
+($\alpha=0.150$ above 105 cycles) that reduces raw validation and test RMSE, yet
+the 125-cycle training cap inherently limits uncensored resolution for engines with
+long remaining lives. The inspected held-out FD004 engine 179 still receives an
+underpredicted RUL of 7.78 cycles at cycle 240 during an operating-regime transition;
+aggregate coverage improvements do not guarantee individual trajectory monotonicity.
 
 A single training seed cannot establish stability. The 125-cycle target limits
 long-horizon raw-RUL evidence. Wide intervals can cover inaccurate point estimates.
