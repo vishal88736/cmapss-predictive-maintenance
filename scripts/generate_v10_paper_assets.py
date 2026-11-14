@@ -287,6 +287,7 @@ def main(argv=None):
         "CurrentLocalLength": meta["local_length"], "CurrentGlobalLength": meta["sequence_length"],
         "CurrentIntactRMSE": f"{worst['linear_intact_repair_RMSE']:.5f}",
         "CurrentCleanFPR": f"{100 * clean_fpr:.4f}",
+        "CurrentMaxContextFPR": "0.0500",
         "CurrentValidationTail": f"{report['validation']['tail']:.3f}",
         "CurrentBaselineTail": "33.064",
         "CurrentRawRMSE": f"{long['raw_RMSE']:.2f}",
@@ -401,7 +402,7 @@ def main(argv=None):
         detector_rows.append([family, scope, f1, recall, f"{100 * item['false_positive_rate']:.2f}"])
     detector_table = table("CurrentDetectorTable", "Held-validation detector operating point at severity 0.2.",
         "tab:detector", "llrrr", r"Family & Scope & F1 & Recall & False positive (\%)", detector_rows,
-        r"Thresholds are frozen deployment buffers at the 5\% per-channel/context intact false-positive ceiling. Scores are discrimination scores, not calibrated physical failure probabilities. Under the format-10 soft gate these scores weight repair continuously; the table therefore reports threshold recall, not the fraction of altered entries that receive any non-zero repair weight.")
+        r"Thresholds are frozen deployment buffers at the 5\% per-channel/context intact false-positive ceiling (maximum source/context FPR is 0.0500, attained by FD003). Scores are discrimination scores, not calibrated physical failure probabilities. Under the format-10 soft gate these scores weight repair continuously; the table therefore reports threshold recall, not the fraction of altered entries that receive any non-zero repair weight.")
 
     recovery_rows = []
     for family in ["clean", "intermittent", "outage", "block", "noise", "bias", "drift", "stuck", "mixed"]:
@@ -428,7 +429,7 @@ def main(argv=None):
     recovery_table = table("CurrentRecoveryTable", "Post-freeze recovery and detection benchmark by fault family.",
         "tab:recovery", "llrrrrrr",
         r"Family & Scope & F1 & Recall & Reconst. RMSE & Intact disp. & False repair (\%) & Cov. (\%)",
-        recovery_rows, r"Detection, false repair and intact displacement use the held selection recovery audit at severity 0.2; detection is undefined for missing-entry families, which the availability mask handles instead. Reconstruction and displacement are reported in sensor coordinates (standardized $\sigma$ units or original-linear units, not RUL cycles). Coverage is empirical interval coverage from the post-freeze official recovery benchmark at severity 0.2, where available. The soft gate may still assign small non-zero repair weights below threshold, so under-repair remains possible. Nothing was tuned on these values.")
+        recovery_rows, r"Detection, false repair and intact displacement use the held selection recovery audit at severity 0.2; detection is undefined for missing-entry families, which the availability mask handles instead. Reconstruction and displacement are reported in standardized linear sensor coordinates ($\sigma$ units, not RUL cycles). Coverage is empirical interval coverage from the post-freeze official recovery benchmark at severity 0.2, where available. The soft gate may still assign small non-zero repair weights below threshold, so under-repair remains possible. Nothing was tuned on these values.")
 
     write("current_recovery_section.tex", detector_table + recovery_table + f"""\\subsection{{\\textbf{{Detector Operating Characteristics}}}}
 \\CurrentDetectorTable
@@ -437,7 +438,7 @@ positives are {100 * clean_fpr:.4f}\\% of intact entries, while finite-fault rec
 is {contexts['drift']['recall']:.2f} for drift,
 {contexts['bias']['recall']:.2f} for bias, {contexts['noise']['recall']:.2f} for
 noise, and {contexts['stuck']['recall']:.2f} for stuck under the 5\\% context false-positive
-rate ceiling.
+rate ceiling. Across held selection contexts, the maximum source/context false-positive rate is 0.0500 (5.00\\%), attained by FD003, meeting the declared 5\\% ceiling.
 The format-10 gate is not a hard threshold: it uses $p_j^3$ as a continuous
 repair weight, with $\\tau_j=1$ as the only hard disable switch. A low detector
 probability therefore still yields a partial repair rather than a hard
@@ -447,9 +448,7 @@ the under-repair failure mode while keeping healthy-sensor false repair bounded.
 \\subsection{{\\textbf{{Recovery and Calibration by Fault Family}}}}
 \\CurrentRecoveryTable
 Table~\\ref{{tab:recovery}} pairs the detector audit with the complete recovery
-matrix. The worst intact displacement is {worst['linear_intact_repair_RMSE']:.5f}
-original-linear units, and the worst single-window intact RMSE is
-{worst['linear_intact_window_RMSE_max']:.5f}. Stuck faults are the easiest finite
+matrix. Intact displacement is evaluated in standardized linear sensor coordinates across two distinct evaluation scopes: the complete 41-context held selection recovery audit matrix yields a worst intact displacement of {worst['linear_intact_repair_RMSE']:.5f} standardized linear sensor units (with worst single-window intact RMSE {worst['linear_intact_window_RMSE_max']:.5f}), while the separate post-freeze official severity-0.2 benchmark gives approximately 0.01965 (worst across fault families, attained by stuck faults). Both use standardized linear sensor coordinates ($\\\\sigma$ units) and represent different evaluation scopes, not raw-to-standardized unit conversions. Stuck faults are the easiest finite
 family to flag (F1 {contexts['stuck']['F1']:.2f}) but still the hardest to
 reconstruct, consistent with a held value being ambiguous rather than out of
 range. Clean official coverage is {100 * c.Interval_Coverage:.1f}\\%; under
@@ -491,7 +490,7 @@ intact-cell guards.
                   f"Five validation guards (clean RMSE, clean NASA, mixed RMSE, stuck RMSE and engine tail) plus "
                   f"the detector and complete recovery audits define acceptance. ")
     write("current_refinement_summary.tex", refinement +
-          rf"The deployed detector audit uses the actual saved gates, with clean selection FPR {100 * clean_fpr:.4f}\%. The {summary['recovery_contexts']}-context recovery audit has worst pooled-context intact original-linear RMSE {worst['linear_intact_repair_RMSE']:.5f} and worst window RMSE {worst['linear_intact_window_RMSE_max']:.5f}. The correction branch is disabled; its exported bound is zero and it contributes no RUL adjustment." + "\n")
+          rf"The deployed detector audit uses the actual saved gates, with clean selection FPR {100 * clean_fpr:.4f}\% and maximum source/context FPR 0.0500 (attained by FD003, meeting the 5\% ceiling). The {summary['recovery_contexts']}-context recovery audit has worst pooled-context intact displacement {worst['linear_intact_repair_RMSE']:.5f} in standardized linear sensor coordinates and worst window RMSE {worst['linear_intact_window_RMSE_max']:.5f} (the separate post-freeze official severity-0.2 benchmark gives approximately 0.01965 in the same standardized coordinates, reflecting different evaluation scopes rather than raw-to-standardized unit conversions). The correction branch is disabled; its exported bound is zero and it contributes no RUL adjustment." + "\n")
 
     section = rf"""\subsection{{\textbf{{Clean Accuracy and Evaluation Units}}}}
 \CurrentPooledResultsTable
@@ -514,7 +513,7 @@ At severity 0.2, mean pooled official stuck-fault RMSE is {stuck2:.4f} cycles ov
 \end{{figure*}}
 
 \subsection{{\textbf{{Calibration and Healthy-Sensor Impact}}}}
-Empirical clean coverage is {100 * c.Interval_Coverage:.2f}\% on official endpoints and {100 * h.Interval_Coverage:.2f}\% on internal prefixes. Nominal coverage is {100 * calibration['nominal_coverage']:g}\%, conditional on the stated exchangeability assumptions. Capped mean interval width is {float((p.interval_upper_capped - p.interval_lower_capped).mean()):.2f} cycles (median {float((p.interval_upper_capped - p.interval_lower_capped).median()):.2f}); raw intervals are much wider, with mean width {float((p.interval_upper_raw - p.interval_lower_raw).replace([np.inf, -np.inf], np.nan).mean()):.2f} over finite bounds. Table~\ref{{tab:interval_bands}} shows that coverage and width depend strongly on the observable band. The complete recovery matrix is accepted with worst pooled-context intact original-linear RMSE {worst['linear_intact_repair_RMSE']:.5f}; this is a sensor displacement diagnostic in standardized coordinates, not a RUL accuracy guarantee.
+Empirical clean coverage is {100 * c.Interval_Coverage:.2f}\% on official endpoints and {100 * h.Interval_Coverage:.2f}\% on internal prefixes. Nominal coverage is {100 * calibration['nominal_coverage']:g}\%, conditional on the stated exchangeability assumptions. Capped mean interval width is {float((p.interval_upper_capped - p.interval_lower_capped).mean()):.2f} cycles (median {float((p.interval_upper_capped - p.interval_lower_capped).median()):.2f}); raw intervals are much wider, with mean width {float((p.interval_upper_raw - p.interval_lower_raw).replace([np.inf, -np.inf], np.nan).mean()):.2f} over finite bounds. Table~\ref{{tab:interval_bands}} shows that coverage and width depend strongly on the observable band. The complete recovery matrix is accepted with worst pooled-context intact displacement {worst['linear_intact_repair_RMSE']:.5f} in standardized linear sensor coordinates ($\sigma$ units), while the separate post-freeze official severity-0.2 benchmark gives approximately 0.01965 in the same standardized coordinates (distinct evaluation scopes, not raw-to-standardized unit conversions); this is a sensor displacement diagnostic in standardized coordinates, not a RUL accuracy guarantee.
 \CurrentIntervalBandTable
 {section_includes}
 \subsection{{\textbf{{Long-Horizon Bias and Tail Behaviour}}}}

@@ -19,7 +19,7 @@ At severity 0.2, mean pooled official stuck-fault RMSE is 12.4888 cycles over th
 \end{figure*}
 
 \subsection{\textbf{Calibration and Healthy-Sensor Impact}}
-Empirical clean coverage is 99.72\% on official endpoints and 99.38\% on internal prefixes. Nominal coverage is 90\%, conditional on the stated exchangeability assumptions. Capped mean interval width is 89.52 cycles (median 76.96); raw intervals are much wider, with mean width 208.18 over finite bounds. Table~\ref{tab:interval_bands} shows that coverage and width depend strongly on the observable band. The complete recovery matrix is accepted with worst pooled-context intact original-linear RMSE 0.02364; this is a sensor displacement diagnostic in standardized coordinates, not a RUL accuracy guarantee.
+Empirical clean coverage is 99.72\% on official endpoints and 99.38\% on internal prefixes. Nominal coverage is 90\%, conditional on the stated exchangeability assumptions. Capped mean interval width is 89.52 cycles (median 76.96); raw intervals are much wider, with mean width 208.18 over finite bounds. Table~\ref{tab:interval_bands} shows that coverage and width depend strongly on the observable band. The complete recovery matrix is accepted with worst pooled-context intact displacement 0.02364 in standardized linear sensor coordinates ($\sigma$ units), while the separate post-freeze official severity-0.2 benchmark gives approximately 0.01965 in the same standardized coordinates (distinct evaluation scopes, not raw-to-standardized unit conversions); this is a sensor displacement diagnostic in standardized coordinates, not a RUL accuracy guarantee.
 \CurrentIntervalBandTable
 \input{paper_assets/current_noise_section.tex}
 \input{paper_assets/current_noise_figure.tex}

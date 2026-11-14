@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-11-14T09:05:01.379529+00:00",
+  "created_at_utc": "2026-11-14T09:30:49.601177+00:00",
   "scope": "Generated from saved measurements; no training, inference or selection.",
   "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114_repaired",
   "bundle_sha256": "9b2b86ef0236351e1d4d68b6a9ea8a5909515ad454060129e1259ad8293aa2a8",
@@ -25,7 +25,7 @@
   },
   "outputs": {
     "current_validation_macros.tex": "cb0ff9a7c63214e49b872ef03ffac9b2b1ca919fdaac49d5e2d7f8dbe4a32867",
-    "current_recovery_section.tex": "4df06decbed2e6cb4e0d5f4dae9f5a30d631d68912982ac69aef3dc3e96ff5b5",
+    "current_recovery_section.tex": "889c53f03f36817e3221394147ebc8d6357a76efb28acec9c1a96806618e7acb",
     "current_efficiency_section.tex": "69841b11556622e297e3bb7ed56713bded1376447d2f883237207a48bdb2aea0"
   },
   "post_freeze_diagnostic": true,

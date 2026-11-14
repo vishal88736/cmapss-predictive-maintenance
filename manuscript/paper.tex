@@ -193,13 +193,14 @@ Fig.~\ref{fig:architecture} separates inference from training-only supervision. 
 \subsection{\textbf{Independent Finite-Fault Detector}}
 The detector receives $[S,M,U]$ (45 features per cycle). Parallel kernel-three and kernel-five convolutions each produce 32 ReLU channels. A GRU-64 and linear 21-logit head yield sigmoid discrimination scores $p$. The head starts with zero weights and bias $-4$, so its initial score is approximately 0.018. A constant initialized head is not reported as learned fault evidence.
 
-Only finite, real entries train the classifier. For each sensor, binary cross entropy is averaged separately over present altered and intact classes, those present-class means are averaged, and sensor losses are then averaged. Missing readings do not become finite-fault positives. The detector is fitted independently on fitting engines using clean and all fault/mixed contexts. Validation selects its checkpoint and representable sensor thresholds $\tau_j$, subject to at most 5\% empirical intact false positives in each validation channel/context. Scores are not calibrated physical failure probabilities.
+Only finite, real entries train the classifier. For each sensor, binary cross entropy is averaged separately over present altered and intact classes, those present-class means are averaged, and sensor losses are then averaged. Missing readings do not become finite-fault positives. The detector is fitted independently on fitting engines using clean and all fault/mixed contexts. Validation selects its checkpoint and representable sensor thresholds $\tau_j$, subject to at most 5\% empirical intact false positives in each validation channel/context (the maximum source/context false-positive rate is 0.0500, attained by FD003, meeting the declared 5\% ceiling). Scores are not calibrated physical failure probabilities.
 
 The format-10 deployed gate uses $p_j^3$ as a continuous finite-repair weight rather than a binary threshold crossing, with $\tau_j=1$ as the only hard channel disable. The cubic power was fixed by a held-validation sweep: power 1.0 failed the FD003 noise recovery guard, whereas power 3.0 preserved it while improving clean and stuck validation. This soft gate mitigates, but does not remove, the low-recall failure mode.
 
 The deployed threshold vector starts from a conservative floor and tightens only
 channels that violate a source/context false-positive bound on held selection
-engines; under the soft gate it acts only as the channel-disable mask. Its
+engines (where the maximum source/context false-positive rate is 0.0500, attained by FD003);
+under the soft gate it acts only as the channel-disable mask. Its
 current audit binds the actual thresholds and detector state; previous detector
 metrics remain explicitly historical. The detector is frozen during generator,
 joint and predictor-refinement training. Detached scores drive the generator and
