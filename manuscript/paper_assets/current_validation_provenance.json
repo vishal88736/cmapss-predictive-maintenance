@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-11-14T08:37:47.741840+00:00",
+  "created_at_utc": "2026-11-14T09:05:01.379529+00:00",
   "scope": "Generated from saved measurements; no training, inference or selection.",
   "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114_repaired",
   "bundle_sha256": "9b2b86ef0236351e1d4d68b6a9ea8a5909515ad454060129e1259ad8293aa2a8",

@@ -81,7 +81,7 @@ FD004 & 23.18 & 15.35 & 3006.3 & 99.6 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize The point model is trained on capped targets. A monotone plateau stretch was evaluated on held selection engines but was not applied because no positive value respected the non-increasing capped-RMSE guard. Raw errors therefore expose the censoring limitation rather than a solved long-horizon task. Raw coverage uses separately calibrated intervals and must not be read as capped-target coverage.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize The point model is trained on capped targets. A monotone plateau stretch ($\alpha=0.150$ above 105 cycles) was selected on held validation engines under a non-increasing capped-RMSE guard, reducing raw errors while keeping capped RMSE within guard. Raw errors beyond 125 cycles expose the training censoring boundary rather than an unconstrained long-horizon task. Raw coverage uses separately calibrated intervals and must not be read as capped-target coverage.\end{minipage}
 \end{table*}
 }
 
@@ -127,7 +127,7 @@ Engines with max error $>40$ cycles & 56/707 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize Plateau stretch $\alpha=0.150$ above 105 cycles, selected on held validation engines under a non-increasing capped-RMSE guard; $\alpha=0$ means the guard rejected every positive stretch. Engine bootstrap 95\% intervals for capped RMSE are [9.71, 11.31] and for raw RMSE [19.11, 21.86] (whole-engine resampling). Any positive stretch is monotone but cannot recover an individual engine's unknown censored target.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize Plateau stretch $\alpha=0.150$ above 105 cycles, selected on held validation engines under a non-increasing capped-RMSE guard (reducing selection raw RMSE from 67.30 to 66.03). Engine bootstrap central 90\% intervals (p05--p95) for capped RMSE are [9.71, 11.31] and for raw RMSE [19.11, 21.86] (whole-engine resampling). Any positive stretch is monotone but cannot recover an individual engine's unknown censored target.\end{minipage}
 \end{table*}
 }
 

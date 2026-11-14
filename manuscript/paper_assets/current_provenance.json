@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-11-14T08:37:54.449956+00:00",
+  "created_at_utc": "2026-11-14T09:07:12.813197+00:00",
   "scope": "Format-10 manuscript assets from one frozen run; no fitting, selection or inference",
   "runs": {
     "v10_repair": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114_repaired",
@@ -94,8 +94,8 @@
       "bytes": 700
     },
     "paper_assets/current_noise_section.tex": {
-      "sha256": "c0a5f45748fff3b67fd124d5e47afcbfd213f5621a2acead5a483f0eb0b42b98",
-      "bytes": 5697
+      "sha256": "cf9e96c0f83ff80c7dd06a460a22655b3b96ec0ef64d638a4c5784070d3940ba",
+      "bytes": 5604
     },
     "paper_assets/current_noise_figure.tex": {
       "sha256": "96bd4bf62f11e8a73dfb07714bf58a07706a4084cf3b2731730bd98c69fa1045",
@@ -106,18 +106,18 @@
       "bytes": 727
     },
     "paper.tex": {
-      "sha256": "af85b2176e8a5b4ee52fa21dcf2e37ed5c785dddbd75a41993d3c7e2b87d3fb1",
-      "bytes": 31048
+      "sha256": "8973fa969340defb96c62788df2b53e02eb3f70bf6572c4518a1bf414ae86989",
+      "bytes": 31652
     },
     "cmapss-predictive-maintenance/artifacts/recovery_benchmark_v10/manifest.json": {
       "sha256": "8ef6bef9c6bb4076d0e45f1ec78a01c2a69e9d26271d133bb4659c09ff3606d6",
       "bytes": 942
     }
   },
-  "generator_sha256": "02d44720c20a58af884b8f7b1ab66e07244722fdcfcb562f7c93298eb3eb4b58",
+  "generator_sha256": "d3a85dc289ed4c046a803184074c9eec2d4f794da592554e87eba9d3e634ea88",
   "output_sha256": {
-    "current_run_macros.tex": "ec5f8f54b33cb9bfb388b6098d1365bd0cde167cfca6e6ce15f8905b20cbda24",
-    "current_results_tables.tex": "0306db77270f3d3ff9579eb3fb3010e2f6eb38a9814140a7b64ab203ef7d9fe7",
+    "current_run_macros.tex": "6645f278fb770e4c1c6b1a6738af46e949b1b250f0cf5adbdb10066cfa3b0feb",
+    "current_results_tables.tex": "c9e4d0f249da30a6d1274f6f8cb023f251007d20208451b2b71ca20c4d6823b9",
     "current_pooled_clean.pdf": "e2b60d4a97642ffe5985572301ffac3d7ced96fd730983b504d7e923dca6adc1",
     "current_pooled_clean.png": "b50c8a98fc987487c0b21c0dfe4ea40153f7854c3fb9ac9aa7097138045030b0",
     "current_pooled_faults.pdf": "30159c61538221aacb04bd4294317cf70d9fd3309fb19f84b3ee7ddf63875dce",
@@ -128,11 +128,11 @@
     "current_pooled_longrul.png": "1933f7eeb127c7dfaaea7fefe01f2ffdfbde7ede6f11face71633be2f620ebfa",
     "current_pooled_engine179.pdf": "66fec52f194d700f6e37fb750110af9bd8365078abfe2a3fc06ece351712cab2",
     "current_pooled_engine179.png": "cd7b8ed998cff0f7a45e95b915ecf3bb5e61553ad606e0915dd8dfb375472b17",
-    "current_recovery_section.tex": "d93ed3ab0a6a12a8910b7453691e53f84f471ceb6147e37e3576bac7931aad08",
+    "current_recovery_section.tex": "d75d4862bc899b996a422eb98b18a5addd2a03faa2db4d03110c2216c6773947",
     "current_abstract.tex": "3f5bcca65ed4668489519ad43b2cdece57c54a4fa8a65db4fee1915996533b2f",
     "current_refinement_summary.tex": "9fb31a00fc915f2ef1bc0408a59f195ab226130cb9933b4c172223743faed1b7",
-    "current_results_section.tex": "f98a27cc56c38ec341ea6a7cf41212f982a31907b4e91d17753a0e276c141ad0",
-    "current_conclusion.tex": "1c7caf40d6ab9f0d7998e01dcd1b84380b04eec07c4e0f376ee9c79e667dbddb"
+    "current_results_section.tex": "88c60b459f45acc9d98f38590fbe1890bcae45d45a18927073c683bd94533ec8",
+    "current_conclusion.tex": "29f225bb269f55727940dc68a46151308d4e0b9258ee9b68b58ab5f68e5fc52b"
   },
   "model_weights_retrained": true,
   "independent_training_seeds": 1,

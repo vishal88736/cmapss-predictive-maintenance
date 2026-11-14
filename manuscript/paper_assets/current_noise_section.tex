@@ -57,12 +57,12 @@ artifact, not a claim that any level matches a measured sensor specification.
 \toprule
 Model & FD001 & FD002 & FD003 & FD004 \\
 \midrule
-GRACE-RUL (one shared model, no subset label) & \textbf{10.04} & \textbf{10.92} & \textbf{9.35} & \textbf{10.67} \\
+GRACE-RUL (one shared model, no subset label) & 10.04 & 10.92 & 9.35 & 10.67 \\
 Hybrid CNN--GRU (reported, five repeats) & 13.1 & 16.8 & 14.5 & 18.9 \\
 TRANS-D3 (reported) & 1.66 & 13.23 & 6.61 & 12.26 \\
 Best third-party baseline (reported) & 10.61 (STAR) & 13.47 (STAR) & 10.71 (STAR) & 15.86 (DLformer) \\
 Reported value ahead of GRACE-RUL & TRANS-D3 1.66 & none & TRANS-D3 6.61 & none \\
-Position among third-party baselines (proposed row excluded) & 1 & 1 & 1 & 1 \\
+Relative position among third-party baselines & 1 & 1 & 1 & 1 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
@@ -72,7 +72,7 @@ Position among third-party baselines (proposed row excluded) & 1 & 1 & 1 & 1 \\
 
 \CurrentLiteratureTable
 Table~\ref{tab:literature} transcribes the reported values of the supplied
-studies. Among the third-party baselines transcribed in Table~\ref{tab:literature}, this work has the lowest RMSE on every subset. Its FD002 and FD004 values are also first among every reported row. TRANS-D3's proposed FD001 and FD003 values remain lower, so no first place overall is claimed. The hybrid CNN--GRU study reports
+studies. Among the third-party baselines transcribed in Table~\ref{tab:literature}, this work achieves lower RMSE on each subset. TRANS-D3's reported proposed values remain lower on FD001 and FD003, so no first-place or state-of-the-art claim is made. The hybrid CNN--GRU study reports
 13.1, 16.8, 14.5 and 18.9, so this model improves every subset by 3.06 to 8.23
 cycles at a comparable 125-cycle target.
 

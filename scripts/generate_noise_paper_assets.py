@@ -153,14 +153,14 @@ def main(argv=None):
 
     # ---- Literature comparison ---------------------------------------------
     rows = [["GRACE-RUL (one shared model, no subset label)",
-             *[rf"\textbf{{{ours[s]:.2f}}}" for s in SUBSETS]],
+             *[f"{ours[s]:.2f}" for s in SUBSETS]],
             ["Hybrid CNN--GRU (reported, five repeats)", *[f"{PAPER_A[s]:.1f}" for s in SUBSETS]],
             ["TRANS-D3 (reported)", *[f"{TRANSD3[s]:.2f}" for s in SUBSETS]],
             ["Best third-party baseline (reported)",
              *[f"{best[s]:.2f} ({BEST_THIRD_PARTY[s]})" for s in SUBSETS]],
             ["Reported value ahead of GRACE-RUL",
              *[("TRANS-D3 " + f"{TRANSD3[s]:.2f}") if TRANSD3[s] < ours[s] else "none" for s in SUBSETS]],
-            ["Position among third-party baselines (proposed row excluded)",
+            ["Relative position among third-party baselines",
              *[f"{rank[s]}" for s in SUBSETS]]]
     literature_table = table("CurrentLiteratureTable",
         "Reported C-MAPSS results at the 125-cycle target against the supplied studies.",
@@ -203,9 +203,8 @@ def main(argv=None):
     ahead = [subset for subset in SUBSETS if TRANSD3[subset] < ours[subset]]
     if all(rank[subset] == 1 for subset in SUBSETS):
         rank_sentence = (r"Among the third-party baselines transcribed in Table~\ref{tab:literature}, "
-                         r"this work has the lowest RMSE on every subset. Its FD002 and FD004 values "
-                         r"are also first among every reported row. TRANS-D3's proposed FD001 and "
-                         r"FD003 values remain lower, so no first place overall is claimed.")
+                         r"this work achieves lower RMSE on each subset. TRANS-D3's reported proposed "
+                         r"values remain lower on FD001 and FD003, so no first-place or state-of-the-art claim is made.")
     else:
         rank_sentence = (r"Against the third-party baselines transcribed in Table~\ref{tab:literature}, "
                          rf"this work ranks {rank['FD001']} on FD001, {rank['FD002']} on FD002, "

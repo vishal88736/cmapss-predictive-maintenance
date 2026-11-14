@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-11-14T08:37:42.066395+00:00",
+  "created_at_utc": "2026-11-14T09:05:00.757367+00:00",
   "scope": "Generated from saved measurements only; no training, inference or recalibration.",
   "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114_repaired",
   "bundle_sha256": "9b2b86ef0236351e1d4d68b6a9ea8a5909515ad454060129e1259ad8293aa2a8",
@@ -25,7 +25,7 @@
   },
   "outputs": {
     "current_noise_macros.tex": "991c05d0226e1f3a31bf3f1ff5f3b177aae4a0a8307b206a9a6482a1e6f102fb",
-    "current_noise_section.tex": "c0a5f45748fff3b67fd124d5e47afcbfd213f5621a2acead5a483f0eb0b42b98",
+    "current_noise_section.tex": "cf9e96c0f83ff80c7dd06a460a22655b3b96ec0ef64d638a4c5784070d3940ba",
     "current_noise_curves.pdf": "f418112fc7578e3818a45a9a2146e21c872de6d08eb7dd48ae04412e390b83ba",
     "current_noise_curves.png": "6ceb685ac178250dc2e8763ea16c903681478715cbecc788d4ad7e6032e170a6",
     "current_noise_figure.tex": "96bd4bf62f11e8a73dfb07714bf58a07706a4084cf3b2731730bd98c69fa1045"

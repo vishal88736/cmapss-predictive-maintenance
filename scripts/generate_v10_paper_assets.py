@@ -272,6 +272,9 @@ def main(argv=None):
         raw_width = float((p.interval_upper_raw[mask] - p.interval_lower_raw[mask]).mean())
         interval_bands[row["band"]] = {**row, "raw_coverage": raw_cover, "raw_width": raw_width}
 
+    contexts = detector_selected["contexts"]
+    plateau = report["validation"]["plateau"]
+
     macro = {
         "CurrentFitEngines": parts["fit"], "CurrentSelectionEngines": parts["validation"],
         "CurrentCalibrationEngines": parts["calibration"], "CurrentTestEngines": parts["test"],
@@ -289,7 +292,12 @@ def main(argv=None):
         "CurrentRawRMSE": f"{long['raw_RMSE']:.2f}",
         "CurrentLongFraction": f"{100 * long['long_fraction']:.1f}",
         "CurrentLongShare": f"{100 * long['long_share_squared_error']:.1f}",
-        "CurrentPlateauAlpha": f"{report['validation']['plateau']['alpha']:.3f}",
+        "CurrentPlateauAlpha": f"{plateau['alpha']:.3f}",
+        "CurrentRecallDrift": f"{contexts['drift']['recall']:.2f}",
+        "CurrentRecallBias": f"{contexts['bias']['recall']:.2f}",
+        "CurrentRecallNoise": f"{contexts['noise']['recall']:.2f}",
+        "CurrentRecallStuck": f"{contexts['stuck']['recall']:.2f}",
+        "CurrentRecallMixed": f"{contexts['mixed']['recall']:.2f}",
     }
     macro.update({f"Current{name.capitalize()}Parameters": value for name, value in counts.items()})
     write("current_run_macros.tex",
@@ -339,7 +347,7 @@ def main(argv=None):
         rawrows.append([s, f"{x.RMSE:.2f}", f"{x.MAE:.2f}", f"{x.NASA_Score:.1f}", f"{100 * x.Interval_Coverage:.1f}"])
     tables.append(table("CurrentRawResultsTable", "Clean official results against original, uncapped RUL.",
         "tab:current_raw", "lrrrr", r"Subset & Raw RMSE & Raw MAE & Raw NASA $S$ & Raw coverage (\%)", rawrows,
-        r"The point model is trained on capped targets. A monotone plateau stretch was evaluated on held selection engines but was not applied because no positive value respected the non-increasing capped-RMSE guard. Raw errors therefore expose the censoring limitation rather than a solved long-horizon task. Raw coverage uses separately calibrated intervals and must not be read as capped-target coverage."))
+        rf"The point model is trained on capped targets. A monotone plateau stretch ($\alpha={plateau['alpha']:.3f}$ above {plateau['knee']:g} cycles) was selected on held validation engines under a non-increasing capped-RMSE guard, reducing raw errors while keeping capped RMSE within guard. Raw errors beyond 125 cycles expose the training censoring boundary rather than an unconstrained long-horizon task. Raw coverage uses separately calibrated intervals and must not be read as capped-target coverage."))
 
     bins = calibration["protocols"]["capped_125"]["stratified_bins"]
     raw_bins = calibration["protocols"]["official_uncapped"]["stratified_bins"]
@@ -365,7 +373,7 @@ def main(argv=None):
          ["Long-engine share of raw squared error", f"{100 * long['long_share_squared_error']:.1f}\\%"],
          ["Worst engine maximum absolute error", f"{tail['max_abs_error']:.2f}"],
          ["Engines with max error $>40$ cycles", f"{tail['gt40']}/{tail['engines']}"]],
-        rf"Plateau stretch $\alpha={report['validation']['plateau']['alpha']:.3f}$ above {report['validation']['plateau']['knee']:g} cycles, selected on held validation engines under a non-increasing capped-RMSE guard; $\alpha=0$ means the guard rejected every positive stretch. Engine bootstrap 95\% intervals for capped RMSE are [{boot['capped_RMSE']['p05']:.2f}, {boot['capped_RMSE']['p95']:.2f}] and for raw RMSE [{boot['raw_RMSE']['p05']:.2f}, {boot['raw_RMSE']['p95']:.2f}] (whole-engine resampling). Any positive stretch is monotone but cannot recover an individual engine's unknown censored target."))
+        rf"Plateau stretch $\alpha={plateau['alpha']:.3f}$ above {plateau['knee']:g} cycles, selected on held validation engines under a non-increasing capped-RMSE guard (reducing selection raw RMSE from {plateau['baseline_raw_RMSE']:.2f} to {plateau['raw_RMSE']:.2f}). Engine bootstrap central 90\% intervals (p05--p95) for capped RMSE are [{boot['capped_RMSE']['p05']:.2f}, {boot['capped_RMSE']['p95']:.2f}] and for raw RMSE [{boot['raw_RMSE']['p05']:.2f}, {boot['raw_RMSE']['p95']:.2f}] (whole-engine resampling). Any positive stretch is monotone but cannot recover an individual engine's unknown censored target."))
 
     band_labels = {"critical_eol": "0--35", "mid_degradation": "35--75",
                    "early_degradation": "75--125", "plateau": "$\\geq125$"}
@@ -420,7 +428,7 @@ def main(argv=None):
     recovery_table = table("CurrentRecoveryTable", "Post-freeze recovery and detection benchmark by fault family.",
         "tab:recovery", "llrrrrrr",
         r"Family & Scope & F1 & Recall & Reconst. RMSE & Intact disp. & False repair (\%) & Cov. (\%)",
-        recovery_rows, r"Detection, false repair and intact displacement use the held selection recovery audit at severity 0.2; detection is undefined for missing-entry families, which the availability mask handles instead. Reconstruction and displacement are original-linear sensor units. Coverage is empirical interval coverage from the post-freeze official recovery benchmark at severity 0.2, where available. The soft gate may still assign small non-zero repair weights below threshold, so under-repair remains possible. Nothing was tuned on these values.")
+        recovery_rows, r"Detection, false repair and intact displacement use the held selection recovery audit at severity 0.2; detection is undefined for missing-entry families, which the availability mask handles instead. Reconstruction and displacement are reported in sensor coordinates (standardized $\sigma$ units or original-linear units, not RUL cycles). Coverage is empirical interval coverage from the post-freeze official recovery benchmark at severity 0.2, where available. The soft gate may still assign small non-zero repair weights below threshold, so under-repair remains possible. Nothing was tuned on these values.")
 
     write("current_recovery_section.tex", detector_table + recovery_table + f"""\\subsection{{\\textbf{{Detector Operating Characteristics}}}}
 \\CurrentDetectorTable
@@ -506,12 +514,12 @@ At severity 0.2, mean pooled official stuck-fault RMSE is {stuck2:.4f} cycles ov
 \end{{figure*}}
 
 \subsection{{\textbf{{Calibration and Healthy-Sensor Impact}}}}
-Empirical clean coverage is {100 * c.Interval_Coverage:.2f}\% on official endpoints and {100 * h.Interval_Coverage:.2f}\% on internal prefixes. Nominal coverage is {100 * calibration['nominal_coverage']:g}\%, conditional on the stated exchangeability assumptions. Capped mean interval width is {float((p.interval_upper_capped - p.interval_lower_capped).mean()):.2f} cycles (median {float((p.interval_upper_capped - p.interval_lower_capped).median()):.2f}); raw intervals are much wider, with mean width {float((p.interval_upper_raw - p.interval_lower_raw).replace([np.inf, -np.inf], np.nan).mean()):.2f} over finite bounds. Table~\ref{{tab:interval_bands}} shows that coverage and width depend strongly on the observable band. The complete recovery matrix is accepted with worst pooled-context intact original-linear RMSE {worst['linear_intact_repair_RMSE']:.5f}; this is a sensor displacement diagnostic, not a RUL accuracy guarantee.
+Empirical clean coverage is {100 * c.Interval_Coverage:.2f}\% on official endpoints and {100 * h.Interval_Coverage:.2f}\% on internal prefixes. Nominal coverage is {100 * calibration['nominal_coverage']:g}\%, conditional on the stated exchangeability assumptions. Capped mean interval width is {float((p.interval_upper_capped - p.interval_lower_capped).mean()):.2f} cycles (median {float((p.interval_upper_capped - p.interval_lower_capped).median()):.2f}); raw intervals are much wider, with mean width {float((p.interval_upper_raw - p.interval_lower_raw).replace([np.inf, -np.inf], np.nan).mean()):.2f} over finite bounds. Table~\ref{{tab:interval_bands}} shows that coverage and width depend strongly on the observable band. The complete recovery matrix is accepted with worst pooled-context intact original-linear RMSE {worst['linear_intact_repair_RMSE']:.5f}; this is a sensor displacement diagnostic in standardized coordinates, not a RUL accuracy guarantee.
 \CurrentIntervalBandTable
 {section_includes}
 \subsection{{\textbf{{Long-Horizon Bias and Tail Behaviour}}}}
 \CurrentLongRULTable
-The capped target cannot distinguish an engine with 130 remaining cycles from one with 250. Table~\ref{{tab:current_long}} quantifies the consequence: {long['long_N']} of {long['N']} clean official engines have raw RUL above 125 and contribute {100 * long['long_share_squared_error']:.1f}\% of raw squared error. Their mean prediction is {long['long_mean_prediction']:.2f} against a mean target of {long['long_mean_target']:.2f}. {plateau_sentence} A positive stretch cannot recover a specific censored target and would not turn the benchmark into an uncensored long-horizon study. The worst engine maximum absolute error is {tail['max_abs_error']:.2f} cycles and {tail['gt40']} of {tail['engines']} engines exceed 40 cycles. Whole-engine bootstrap intervals in Table~\ref{{tab:current_long}} describe pipeline variability over engines, not training seeds.
+The capped target cannot distinguish an engine with 130 remaining cycles from one with 250. Table~\ref{{tab:current_long}} quantifies the consequence: {long['long_N']} of {long['N']} clean official engines have raw RUL above 125 and contribute {100 * long['long_share_squared_error']:.1f}\% of raw squared error. Their mean prediction is {long['long_mean_prediction']:.2f} against a mean target of {long['long_mean_target']:.2f}. {plateau_sentence} A positive stretch cannot recover a specific censored target and would not turn the benchmark into an uncensored long-horizon study. The worst engine maximum absolute error is {tail['max_abs_error']:.2f} cycles and {tail['gt40']} of {tail['engines']} engines exceed 40 cycles. Whole-engine bootstrap central 90\% intervals in Table~\ref{{tab:current_long}} describe pipeline variability over engines, not training seeds.
 \begin{{figure*}}[tp]\centering
 \includegraphics[width=\textwidth]{{paper_assets/current_pooled_longrul.pdf}}
 \caption{{Clean official prediction against capped and uncensored targets. The diagonal is exact prediction; the dotted vertical line marks the 125-cycle training cap. Points to the right of the cap expose the censoring bias summarized in Table~\ref{{tab:current_long}}.}}\label{{fig:pooled_longrul}}
@@ -525,10 +533,10 @@ This case remains a post-freeze diagnostic and is excluded from selection. At cy
 \end{{figure*}}
 
 \subsection{{\textbf{{Evidence and Reproducibility Boundaries}}}}
-Point metrics, counts and coverage are recomputed from saved predictions. All manuscript numbers and plotted values are tied to one completed run, with input/output SHA-256 hashes in \texttt{{paper_assets/current_provenance.json}}. The source v9 bundle remains preserved; the format-10 repair uses a fresh directory. This does not restore independence of previously inspected internal or official benchmark cases. Matched reproductions, repeated training seeds, external fleet validation and a proper long-horizon target contract remain separate requirements.
+Point metrics, counts and coverage are recomputed from saved predictions. All manuscript numbers and plotted values are tied to one completed run, with input/output SHA-256 hashes in \texttt{{paper\_assets/current\_provenance.json}}. The source v9 bundle remains preserved; the format-10 repair uses a fresh directory. This does not restore independence of previously inspected internal or official benchmark cases. Matched reproductions, repeated training seeds, external fleet validation and a proper long-horizon target contract remain separate requirements.
 """
     write("current_results_section.tex", section)
-    write("current_conclusion.tex", rf"""The format-10 GRACE-RUL pipeline combines related-channel fault simulation, independent detection, probability-weighted support-bounded recovery and local/global RUL prediction with an observed engine-age channel. Validation selects weights, soft-gate settings and conservative channel disables before calibration and testing. Official capped RMSE is {c.RMSE:.2f} cycles and severity-0.2 stuck RMSE is {stuck2:.2f}; the complete recovery matrix bounds observed intact displacement on held selection contexts. Observable scaling preserves one simultaneous calibration score per engine. Explicit failure analysis, separate coverage units and immutable provenance delimit the evidence. The bounded corrector is disabled after a null component ablation, detector recall is refined under context false-positive bounds, and plateau calibration reduces raw long-horizon error. {plateau_sentence} These results support an auditable benchmark study; they do not establish universal sensor recovery, zero severe prediction errors, superiority over matched re-implementations of the compared methods, or real-fleet safety.
+    write("current_conclusion.tex", rf"""The format-10 GRACE-RUL pipeline combines related-channel fault simulation, independent detection, probability-weighted support-bounded recovery and local/global RUL prediction with an observed engine-age channel. Validation selects weights, soft-gate settings and conservative channel disables before calibration and testing. Official capped RMSE is {c.RMSE:.2f} cycles and severity-0.2 stuck RMSE is {stuck2:.2f}; the complete recovery matrix bounds observed intact displacement in standardized sensor coordinates on held selection contexts. Observable scaling preserves one simultaneous calibration score per engine. Explicit failure analysis, separate coverage units and immutable provenance delimit the evidence. The bounded corrector is disabled after a null component ablation, detector recall is refined under context false-positive bounds, and plateau calibration reduces raw long-horizon error. {plateau_sentence} These results support an auditable benchmark study; they do not establish universal sensor recovery, zero severe prediction errors, superiority over matched re-implementations of the compared methods, or real-fleet safety.
 """)
 
     for name in ["current_architecture.tex", "current_workflow.tex", "current_calibration_method.tex",

@@ -368,23 +368,25 @@ moves are bounded, whereas outliers may move inward across fitting support.
 A finite faulty in-support reading can still be under-repaired. Related-channel
 and temporally correlated simulation remains a hypothesis about acquisition
 errors, not measured aircraft fault prevalence. Detector threshold recall was refined under per-source false-positive bounds
-(improving stuck to 0.64, bias to 0.39, and mixed to 0.48), but subtle drift (0.27)
-and noise (0.28) faults remain challenging under the strict 5\% false-positive
+(improving stuck to \CurrentRecallStuck{}, bias to \CurrentRecallBias{}, and mixed to \CurrentRecallMixed{}), but subtle drift (\CurrentRecallDrift{})
+and noise (\CurrentRecallNoise{}) faults remain challenging under the strict 5\% false-positive
 rate ceiling. Multi-knee plateau calibration accepts a positive stretch
-($\alpha=0.150$ above 105 cycles) that reduces raw validation and test RMSE, yet
+($\alpha=\CurrentPlateauAlpha{}$ above 105 cycles) that reduces raw validation and test RMSE, yet
 the 125-cycle training cap inherently limits uncensored resolution for engines with
 long remaining lives. The inspected held-out FD004 engine 179 still receives an
 underpredicted RUL of 7.78 cycles at cycle 240 during an operating-regime transition;
 aggregate coverage improvements do not guarantee individual trajectory monotonicity.
 
-A single training seed cannot establish stability. The 125-cycle target limits
+A single full-pipeline training seed cannot establish end-to-end stability;
+while fine-tuning random seeds can be varied, full-pipeline training-seed
+replication from scratch remains future work. The 125-cycle target limits
 long-horizon raw-RUL evidence. Wide intervals can cover inaccurate point estimates.
 Engine exchangeability, censoring policy and fleet transfer remain assumptions;
 previously inspected internal and official cases remain exploratory. Neither
 aggregate coverage nor a plausible narrative repairs a severe individual miss.
 Further remedies should be designed and selected on fitting/development engines,
-then tested on independent data. Matched paper reproductions, explanation fidelity, repeated training seeds
-and real-fleet validation remain incomplete. No pre-registered holdout can be
+then tested on independent data. Matched paper reproductions, explanation fidelity, independent full-pipeline training seeds
+and real-fleet validation remain future requirements. No pre-registered holdout can be
 reconstructed retrospectively: every C-MAPSS engine has already served in
 fitting, selection, calibration or evaluation, so the component ablation in
 Section~\ref{sec:results} is a post-freeze diagnostic rather than independent
