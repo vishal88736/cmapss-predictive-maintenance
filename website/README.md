@@ -1,117 +1,96 @@
-# GRACE-RUL website
+# AeroGuard · GRACE-RUL Predictive Maintenance Platform
 
-A local sensor-recovery and remaining-life workspace using the exact model
-definitions trained by `GRACE_RUL_all_subsets.ipynb`.
+A fault-tolerant turbofan prognostics, sensor recovery, and assurance diagnostics platform built on NASA C-MAPSS data and the frozen Format-10 GRACE-RUL model (`pooled_v10_paper_20261114_repaired/grace_rul_ALL.pt`).
 
-## Run
+Inspired by the AeroGuard predictive maintenance architecture, this platform features a pure Python/FastAPI backend and a native vanilla ES modules frontend (zero Node.js or npm build step required to run).
 
-From the project root:
+---
 
-```bash
-bash scripts/setup_env.sh
-npm --prefix website install
-npm --prefix website run build
-.venv/bin/python -m uvicorn website.backend.app:app --host 127.0.0.1 --port 8000
-```
+## 🚀 Quick Start
 
-Open <http://127.0.0.1:8000>. For frontend development, run
-`npm --prefix website run dev` in a second terminal and open
-<http://127.0.0.1:5173>; Vite proxies `/api` to port 8000.
-
-## Model bundle
-
-The visible model placeholder remains until full training finishes. Upload previews
-and sample downloads work without weights; inference and explanations return a
-clear model-unavailable response. The website never trains inside a web request.
-
-Run the notebook with `QUICK_RUN = False`. Full format-5, format-6, and format-7 bundles under
-`artifacts/<run>/grace_rul_ALL.pt` are discovered automatically, with their
-`run_manifest.json`. Refresh the model status to load the newest run.
-
-To select a specific bundle, including a quick execution check:
+Run the server from the repository root:
 
 ```bash
-GRACE_MODEL_PATH="/absolute/path/to/grace_rul_ALL.pt" \
-  .venv/bin/python -m uvicorn website.backend.app:app --host 127.0.0.1 --port 8000
+./minor/bin/python -m uvicorn website.backend.app:app --host 127.0.0.1 --port 8000
 ```
 
-An explicitly selected quick artifact is labeled **Quick validation model**;
-automatic discovery excludes it. Artifacts below format 5 have incompatible architecture
-and are rejected. `models/model_manifest.json` documents the pending model slot
-without pretending to contain trained weights.
+Then open **<http://127.0.0.1:8000>** in your browser.
 
-Optional environment settings: `GRACE_ARTIFACTS_DIR` selects another artifact root,
-`GRACE_DEVICE` selects `cpu` or `cuda`, and `GRACE_CPU_THREADS` defaults to `2`.
+---
 
-## Data and reports
+## 🎯 Key Features & Views
 
-Upload headered CSV or original whitespace-delimited C-MAPSS text. Required columns:
-`unit`, `cycle`, `setting_1`–`setting_3`, and `sensor_1`–`sensor_21`. Blank sensor
-cells indicate missing readings. Choose the subset, or include a `subset` column
-for mixed-subset CSVs. Each engine must have consecutive integer cycles; a history
-may begin at any positive cycle. Represent missing observations with rows containing
-blank sensors and complete operating settings. Gaps are rejected because model
-timesteps represent consecutive cycles.
+### 1. Fleet Dashboard (`/dashboard`)
+- **Prognostic KPIs**: Total evaluated engines, health status breakdown (Healthy, Watch, Attention, Critical), fleet mean RUL, and flagged sensor faults.
+- **Certified Performance Banner**: Discloses verified format-10 bundle metrics:
+  - Official Capped Clean RMSE: **11.08 cycles**
+  - Stuck-fault RMSE (@0.20): **12.11 cycles**
+  - Mixed-fault RMSE (@0.20): **11.48 cycles**
+  - Healthy Sensor Displacement Ceiling: **≤ 0.02364 σ**
+- **Interactive Visualizations**:
+  - Remaining Useful Life Distribution (Histogram)
+  - Fleet Health Breakdown (Donut Chart)
+  - Engine Watchlist Table with RUL meters and 90% conformal intervals.
 
-Optional `true_rul` values at engine endpoints represent the raw uploaded truth.
-Reports preserve that truth and expose both capped-target and raw-target metrics
-under `metrics_by_protocol` and `metrics_by_subset_protocol`. The console selects
-between these two evaluation conventions. The legacy `metrics`, `metrics_by_subset`,
-and `error` fields retain raw-target errors and include an explicit protocol label.
-Settings must be complete.
+### 2. Engine Explorer (`/engines` and `/engines/:asset`)
+- Search by engine ID/asset, filter by subset (`FD001`–`FD004`) and health status.
+- **Deep Engine Detail View**:
+  - Predicted RUL with central 90% split conformal prediction interval `[p05, p95]`.
+  - RUL Degradation Trajectory line chart with conformal confidence envelope.
+  - **21-Sensor Robust Health Matrix**:
+    - Raw observed vs soft-recovered sensor telemetry.
+    - Fault detector score $p_j \in [0, 1]$.
+    - Soft cubic gate weight $w_j = p_j^3$.
+    - Sensor repair displacement $\Delta x_j = \hat{x}_j - x_j$.
+    - Sensor status classification (`Clean`, `Suspect`, `Fault Flagged`).
+    - Interactive 40-cycle historical telemetry sparklines.
 
-The console shows capped-target RUL, bounded correction, local/global gates,
-target-specific intervals, and optional MC-dropout spread. Each engine reports
-`target_convention` and `train_rul_cap`. The training target is the smaller of raw
-remaining life and this cap. `failure_cycle_proxy` adds the model estimate to the
-last observed cycle; its scope is limited by the capped training target. The
-deprecated `estimated_failure_cycle` key retains the same proxy for existing clients,
-with `estimated_failure_cycle_scope` explaining its meaning. It is not an estimate
-of the physical failure date for engines beyond the training horizon.
+### 3. Assurance & Diagnostic Cases (`/assurance`)
+- **Case 1: FD004 Engine 179 Failure Diagnostic**:
+  - Full 420-cycle lifetime inspector.
+  - Deep dive into the famous cycle 240 underprediction (predicted 7.7 vs target 125 cycles).
+  - Operating regime transitions across flight envelopes.
+  - Honest safety disclosure: conformal bands expand to reflect epistemic uncertainty under censored outliers.
+- **Case 2: Live Fault Injection & Sensor Recovery Assurance Bench**:
+  - Live interactive fault simulation: select target engine, fault family (`stuck`, `bias`, `drift`, `noise`, `outage`), sensor channel (1–21), and severity $\alpha \in [0.05, 0.50]$.
+  - Verifies healthy-sensor displacement $\delta_{\text{healthy}} = \frac{1}{|S_{\text{intact}}|}\sum_{k \in S_{\text{intact}}} |x_k^{\text{repaired}} - x_k^{\text{clean}}|$.
+  - Displays formal **ASSURANCE PASS** badge when $\delta_{\text{healthy}} \le 0.02364 \sigma$.
+  - Real-time telemetry chart: Clean vs Injected Fault vs Soft-Repaired sensor signal.
+- **Case 3: Conformal Prediction & Plateau Assurance**:
+  - Observable 4-bin predicted-RUL adaptive calibration.
+  - Monotone plateau stretch ($\alpha = 0.150$, knee 105) bounding raw long-horizon bias.
 
-Sensor reports use the final
-70 observed positions and show missing/suspected cycles, validation thresholds,
-repair magnitude, and observed/recovered readings in original sensor units.
+### 4. Test Data Upload & Batch Evaluation (`/upload`)
+- **File Upload**: Drag-and-drop or browse NASA C-MAPSS whitespace-delimited text files (e.g. `test_FD001.txt`) or headered CSV files up to 25 MB.
+- **1-Click Preloaded Benchmark Fleets**:
+  - `Sample Fleet (5 Engines)`
+  - `Official FD001 (100 Engines)`
+  - `Official FD002 (259 Engines)`
+  - `Official FD003 (100 Engines)`
+  - `Official FD004 (248 Engines)`
+- **Batch Evaluation Summary**: Engines evaluated, inference latency, fleet mean RUL, capped RMSE (if ground truth available), and empirical coverage.
+- **Export**: One-click **Download Results CSV** button (`/api/download-results`).
 
-Select an engine and sensor, then **Run SHAP + LIME**. The service separately explains
-final RUL and that sensor's estimated finite-fault score with coherent temporal
-blocks and fitting-data reference backgrounds. LIME held-out fidelity is reported.
-Entirely missing sensors have directly observable outages; select an available
-channel for finite-fault explanations.
+### 5. Model Registry & Provenance (`/models`)
+- Frozen format-10 bundle details (`pooled_v10_paper_20261114_repaired/grace_rul_ALL.pt`).
+- Cryptographic SHA-256 hashes for model weights (`9b2b86ef0236...`), preprocessors, and manuscript assets.
+- Official benchmark comparison table across release iterations.
 
-The model page uses actual connected-run CSVs. Reported test metrics keep the
-125-cycle capped target convention together; original-target results remain in the
-run directory. Interval method, target convention, and scope come from the connected
-calibration metadata. Format-7 bundles calibrate capped and raw targets separately.
-Legacy format-5/6 intervals support capped targets only: raw-target coverage is
-`null` and `Interval_N` is zero rather than reusing an incompatible interval.
+---
 
-An insufficient calibration sample at the requested nominal level can yield an
-unbounded interval. Its lower bound is zero, `interval_upper` and `interval_width`
-are JSON `null`, and `interval_unbounded` is `true`; the console displays `∞`.
-These flags are also included in trajectory and per-target `intervals` records.
-Metrics compute coverage using the actual unbounded interval before JSON encoding.
-Coverage under corruption, different endpoint distributions, and uploaded data
-requires measurement; the displayed nominal level is not observed coverage.
+## 📡 REST API Reference
 
-The updated training protocol uses an 80% training pool and 20% validation split
-by complete engine, with 10% of that pool reserved for calibration. FD002/FD004
-use six operating-regime normalizers fitted on fitting engines only. The notebook
-defaults to full CUDA training. Per-fold upstream CV results and mean/std summaries
-are available through `/api/model` and the run CSVs; official test tables evaluate
-the complete corrected model.
-
-Uploads are processed in memory. **Export JSON** includes predictions, sensor
-evidence, and requested explanations. No uploaded file is persisted by the API.
-
-## API
-
-| Route | Purpose |
-| --- | --- |
-| `GET /health` | Service health and model state |
-| `GET /api/status` | Placeholder, quick, or trained state |
-| `GET /api/model` | Configuration and recorded experiment tables |
-| `GET /api/sample?subset=FD001` | Five-engine sample CSV |
-| `POST /api/preview` | Validate multipart `file`, `subset` |
-| `POST /api/predict` | Predict; optional `mc_dropout` |
-| `POST /api/explain` | Explain multipart `file`, `subset`, `unit`, optional `sensor` (1–21) |
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Service health status and format version |
+| `GET` | `/api/status` | Model bundle readiness and hardware device |
+| `GET` | `/api/dashboard` | Fleet summary KPIs, health breakdown, and benchmark values |
+| `GET` | `/api/engines` | Filterable, paginated fleet engine list |
+| `GET` | `/api/engines/{asset}` | Detailed engine diagnostics and 21-sensor matrix |
+| `POST` | `/api/upload` | Multipart file upload for batch prognostics |
+| `POST` | `/api/load-sample` | 1-Click quick load of official NASA test sets |
+| `GET` | `/api/assurance/engine179` | Full telemetry and diagnostic data for Engine 179 |
+| `POST` | `/api/assurance/simulate-fault` | Live sensor fault injection and displacement verification |
+| `GET` | `/api/models` | Model registry, parameters, benchmarks, and provenance |
+| `GET` | `/api/download-results` | Export current batch prognostic results as CSV |
+| `GET` | `/api/sample` | Download standard sample test CSV |

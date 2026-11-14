@@ -17,3 +17,175 @@ td{color:#5C708C;font-size:11px}th{color:#64748B}.tag{color:#436DAB}.badge.atten
 .nav-label,.nav-item,.mode-strip,.field-label,.checkboxes label,.check-line,.compare-select,.detail-metric span,.dialog-metric span,.ready-mark.pending{color:#5D718B}.nav-item.active{color:#A85409}.mode-strip.demo{color:#87641D}.mode-strip.demo button{color:#87641D}
 .button.primary{color:#172A46}.button.blue{background:#2565D1;border-color:#2565D1}.text-button,.text-link,.sidebar-note a,.solution-step>a{color:#2464CD}.button.soft{color:#245DB5}.hero-result strong,.detail-metric strong.orange{color:#A84B03}.hero-copy h1 span{color:#D65D04}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* ==========================================================================
+   AeroGuard · GRACE-RUL Extensions: Assurance Bench, Upload & Diagnostics
+   ========================================================================== */
+
+.subtabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+}
+.subtab {
+  border: 1px solid #DCE7F3;
+  background: #fff;
+  color: #4A6382;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all .15s ease;
+  white-space: nowrap;
+}
+.subtab:hover {
+  background: #F5F9FF;
+  border-color: #BCD3F2;
+  color: #1F4575;
+}
+.subtab.active {
+  background: #EDF5FF;
+  border-color: #3478F6;
+  color: #2464CD;
+  box-shadow: 0 1px 3px rgba(36, 100, 205, 0.12);
+}
+
+.upload-dropzone {
+  border: 2px dashed #B8D1F3;
+  border-radius: 14px;
+  background: #F8FBFF;
+  padding: 40px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.upload-dropzone:hover, .upload-dropzone.dragover {
+  background: #EDF5FF;
+  border-color: #3478F6;
+}
+.dropzone-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #E5F0FF;
+  color: #2464CD;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dropzone-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.quick-load-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.quick-load-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: all .15s ease;
+  text-align: left;
+}
+.quick-load-card:hover {
+  border-color: #3478F6;
+  box-shadow: 0 4px 12px rgba(52, 120, 246, 0.08);
+  transform: translateY(-1px);
+}
+.quick-load-card strong {
+  color: var(--text);
+  font-size: 13px;
+}
+.quick-load-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.assurance-banner {
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 20px 0;
+  border: 1px solid transparent;
+}
+.assurance-banner.pass {
+  background: #EBF9F3;
+  border-color: #BEEBD8;
+  color: #0E684B;
+}
+.assurance-banner.fail {
+  background: #FFF2F2;
+  border-color: #F8CDCF;
+  color: #A32A32;
+}
+.assurance-banner h4 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.assurance-banner p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.assurance-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+}
+
+.slider-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+.slider-header strong {
+  color: #2464CD;
+  font-size: 14px;
+}
+.slider-input {
+  width: 100%;
+  accent-color: #3478F6;
+  height: 6px;
+  cursor: pointer;
+}
+
+.table-badge-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
