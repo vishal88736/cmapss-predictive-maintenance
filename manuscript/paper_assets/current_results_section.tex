@@ -3,32 +3,44 @@
 \CurrentComparisonTable
 \CurrentRawResultsTable
 \CurrentAdaptiveCalibrationTable
-The frozen shared model achieves official clean capped RMSE 12.0080 and MAE 8.5224 cycles across 707 endpoint engines. Original pooled revision 2 had RMSE 12.1062 on the reused official benchmark. Internal clean RMSE is 13.2974; its 484 prefixes belong to 71 engines and are dependent within engine. These comparisons describe completed runs, rather than an independent confirmatory test.
-The immediate preserved fine-tuned source had official RMSE 11.9415; Table~\ref{tab:current_comparison} reports that comparison as well, including any regressions. Validation guards and the held selection-tail objective fixed the current model before these test values were read.
+The frozen shared format-10 model achieves official clean capped RMSE 11.0795 and MAE 7.1890 cycles across 707 endpoint engines. Original pooled revision 2 had RMSE 12.1062 on the reused official benchmark, and the preserved v9 source had 12.0080. Internal clean RMSE is 12.0732 against 13.2974 for the preserved source; its 484 prefixes belong to 71 engines and are dependent within engine. These comparisons describe completed runs, rather than an independent confirmatory test, and later test values did not select the format-10 candidate.
 \begin{figure*}[tp]\centering
 \includegraphics[width=\textwidth]{paper_assets/current_pooled_clean.pdf}
-\caption{Clean capped RMSE for the frozen current model, its immediate preserved source, and original pooled revision 2. Each is one training-seed pipeline; no across-training-seed uncertainty is implied. Internal values use a fixed causal prefix grid.}\label{fig:pooled_clean}
+\caption{Clean capped RMSE for the frozen format-10 model, its preserved v9 source, and original pooled revision 2. Each is one training-seed pipeline; no across-training-seed uncertainty is implied. Internal values use a fixed causal prefix grid.}\label{fig:pooled_clean}
 \end{figure*}
+
 \subsection{\textbf{Structured-Fault Robustness}}
-At severity 0.2, mean pooled official stuck-fault RMSE is 15.0767 cycles over three corruption realizations. Averaging all declared stuck severities and realizations instead gives 17.6636; these summaries must not be interchanged. Fig.~\ref{fig:pooled_faults} exposes severity dependence on the pooled fleet and the multi-regime subsets. Corruptions preserve original RUL labels and do not represent recorded aircraft sensor incidents.
+At severity 0.2, mean pooled official stuck-fault RMSE is 12.1131 cycles over three corruption realizations; mixed faults average 11.4078. The format-10 official RUL evaluation used this single declared severity; higher-severity official values are not claimed. Fig.~\ref{fig:pooled_faults} exposes severity dependence on the pooled fleet and the multi-regime subsets for the preserved source, while the format-10 panel is limited to the evaluated severity. Corruptions preserve original RUL labels and do not represent recorded aircraft sensor incidents.
 \begin{figure*}[tp]\centering
 \includegraphics[width=\textwidth]{paper_assets/current_pooled_faults.pdf}
 \par\smallskip
 \includegraphics[width=\textwidth]{paper_assets/current_pooled_calibration.pdf}
-\caption{Top: official capped-target robustness under structured faults; curves are means and bands are sample standard deviations over three corruption replicates of one frozen model, not training seeds or fleet confidence intervals. Bottom: empirical clean coverage and mean interval width grouped by observable predicted RUL. Grouped coverage is descriptive and does not establish conditional coverage for a realized engine or life stage. The simultaneous calibration score spans all bins for each engine.}\label{fig:pooled_faults}\label{fig:pooled_calibration}
+\caption{Top: official capped-target robustness under structured faults. Curves are the preserved v9 source (means and sample standard deviations over three corruption replicates); stars mark the format-10 repair at the single evaluated severity 0.2. Neither is a training-seed or fleet confidence interval. Bottom: empirical clean coverage and mean interval width grouped by observable predicted RUL. Grouped coverage is descriptive and does not establish conditional coverage for a realized engine or life stage.}\label{fig:pooled_faults}\label{fig:pooled_calibration}
 \end{figure*}
+
 \subsection{\textbf{Calibration and Healthy-Sensor Impact}}
-Empirical clean coverage is 99.29\% on official endpoints and 98.97\% on internal prefixes. Internal whole-engine coverage over the evaluated grid is 95.77\%, a different unit from prefix coverage and from every-cycle trajectory coverage. Nominal coverage is 90\%, conditional on the stated exchangeability assumptions. The complete recovery matrix is accepted with worst pooled-context intact original-linear RMSE 0.00983; this is a sensor displacement diagnostic, not a RUL accuracy guarantee.
+Empirical clean coverage is 98.44\% on official endpoints and 98.97\% on internal prefixes. Nominal coverage is 90\%, conditional on the stated exchangeability assumptions. Capped mean interval width is 60.32 cycles (median 77.91); raw intervals are much wider, with mean width 259.32 over finite bounds. Table~\ref{tab:interval_bands} shows that coverage and width depend strongly on the observable band. The complete recovery matrix is accepted with worst pooled-context intact original-linear RMSE 0.02521; this is a sensor displacement diagnostic, not a RUL accuracy guarantee.
+\CurrentIntervalBandTable
 \input{paper_assets/current_noise_section.tex}
 \input{paper_assets/current_noise_figure.tex}
 \input{paper_assets/current_ablation_section.tex}
 \input{paper_assets/current_recovery_section.tex}
 \input{paper_assets/current_efficiency_section.tex}
+
+\subsection{\textbf{Long-Horizon Bias and Tail Behaviour}}
+\CurrentLongRULTable
+The capped target cannot distinguish an engine with 130 remaining cycles from one with 250. Table~\ref{tab:current_long} quantifies the consequence: 150 of 707 clean official engines have raw RUL above 125 and contribute 77.7\% of raw squared error. Their mean prediction is 118.41 against a mean target of 154.07. The monotone plateau stretch was available, but its non-increasing capped-RMSE guard rejected every positive value (alpha=0), so the raw-target bias is not reduced. A positive stretch cannot recover a specific censored target and would not turn the benchmark into an uncensored long-horizon study. The worst engine maximum absolute error is 102.05 cycles and 65 of 707 engines exceed 40 cycles. Whole-engine bootstrap intervals in Table~\ref{tab:current_long} describe pipeline variability over engines, not training seeds.
+\begin{figure*}[tp]\centering
+\includegraphics[width=\textwidth]{paper_assets/current_pooled_longrul.pdf}
+\caption{Clean official prediction against capped and uncensored targets. The diagonal is exact prediction; the dotted vertical line marks the 125-cycle training cap. Points to the right of the cap expose the censoring bias summarized in Table~\ref{tab:current_long}.}\label{fig:pooled_longrul}
+\end{figure*}
+
 \subsection{\textbf{Previously Inspected FD004 Engine 179}}
-This case is a post-freeze diagnostic, excluded from the current selection objective. At cycle 240 the model predicts 7.440 against capped target 125 (raw RUL 195); its capped interval is [0.000, 22.581]. At cycle 270 it predicts 114.282. Aggregate coverage cannot establish that this particular prediction is accurate or covered. Raw settings at cycles 240 and 245 are [10.0067, 0.2516, 100] and [20.0005, 0.7, 100], respectively, and correspond to different fitted regimes. Consequently the earlier identical-setting physical-excursion explanation is unsupported. The local branch uses 30 cycles and the Transformer uses 70; a local-window-only causal explanation is also incomplete.
+This case remains a post-freeze diagnostic and is excluded from selection. At cycle 240 the model predicts 7.699 against capped target 125; its capped interval is [0.000, 24.251]. The age channel and active-path continuity objective were introduced partly in response to this instability, but a single fixed case is not evidence of general temporal safety. Aggregate coverage cannot establish that this particular prediction is accurate or covered.
 \begin{figure*}[tp]\centering
 \includegraphics[width=\textwidth]{paper_assets/current_pooled_engine179.pdf}
-\caption{Observed failure-case trajectory and operating-setting changes. Predictions and intervals are saved outputs of the frozen current artifact. Colors in the lower panel identify fitted regimes; raw settings are not ground truth about a physical fault cause.}\label{fig:pooled_engine179}
+\caption{Observed failure-case trajectory under the format-10 repair. Predictions and intervals are saved outputs of the frozen artifact. Colors in the lower panel identify fitted regimes; raw settings are not ground truth about a physical fault cause.}\label{fig:pooled_engine179}
 \end{figure*}
+
 \subsection{\textbf{Evidence and Reproducibility Boundaries}}
-Point metrics, counts and coverage are recomputed from saved predictions. All manuscript numbers and plotted values are tied to a single completed run, with input/output SHA-256 hashes in \texttt{paper\_assets/current\_provenance.json}; the noise benchmark and the cross-study transcription carry their own record in \texttt{paper\_assets/current\_noise\_provenance.json}. Asset generation performs no model fitting or inference. The source model and earlier audit directories remain preserved; new artifacts use fresh directories. This does not restore independence of previously inspected internal or official benchmark cases. Matched reproductions of the compared methods, repeated training seeds and external fleet validation remain separate requirements.
+Point metrics, counts and coverage are recomputed from saved predictions. All manuscript numbers and plotted values are tied to one completed run, with input/output SHA-256 hashes in \texttt{paper_assets/current_provenance.json}. The source v9 bundle remains preserved; the format-10 repair uses a fresh directory. This does not restore independence of previously inspected internal or official benchmark cases. Matched reproductions, repeated training seeds, external fleet validation and a proper long-horizon target contract remain separate requirements.

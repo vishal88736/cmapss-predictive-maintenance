@@ -7,7 +7,9 @@ not alter an earlier corruption realization or select onset by eventual failure.
 The four original training files define the engine-disjoint fit/selection/
 calibration/internal-test groups in Table~\ref{tab:pooled_partitions}. Scaler,
 raw-unit fault scales and repair support use fitting engines only. Fitting-engine
-OOF features exclude their held fold from temporary fitting and inner selection.
+OOF features were used to train the source corrector and exclude their held fold
+from temporary fitting and inner selection; in format 10 that corrector is
+disabled with a zero bound and contributes no inference feature or adjustment.
 Predictor refinement uses fitting engines; every clean/source/NASA, mixed/stuck
 and tail-selection check uses held selection engines. Calibration engines enter
 only after that choice is fixed.

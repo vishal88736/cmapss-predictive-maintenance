@@ -42,6 +42,8 @@ def main(argv=None):
     parser.add_argument("--recovery-run", type=Path, default=ROOT / "artifacts/recovery_benchmark_full")
     parser.add_argument("--efficiency-run", type=Path, default=ROOT / "artifacts/efficiency_benchmark_full")
     args = parser.parse_args(argv)
+    args.recovery_run = args.recovery_run.resolve()
+    args.efficiency_run = args.efficiency_run.resolve()
     pointer = json.loads((OUT / "current_run.json").read_text())
     for path in [args.recovery_run / "manifest.json", args.efficiency_run / "manifest.json"]:
         if json.loads(path.read_text())["bundle_sha256"] != pointer["bundle_sha256"]:
@@ -137,9 +139,9 @@ Detection thresholds were frozen before these values were read.
 The artifact is small: \CurrentParams{{}} parameters, {metric('model_size'):.2f} MB of
 float32 weights, and {metric('mac_per_window_full') / 1e6:.1f} M multiply-accumulates
 per window. A single-window forward pass takes
-{metric('latency_window_full'):.1f} ms on this CPU and the recovery path accounts
-for about {100 * (metric('latency_window_full') / metric('latency_window_bypass') - 1):.0f}\%
-of it, which is the price of the stuck-fault gain rather than an overhead to hide.
+{metric('latency_window_full'):.1f} ms on this CPU; the recovery path adds
+about {100 * (metric('latency_window_full') / metric('latency_window_bypass') - 1):.0f}\%
+latency over bypass, which is the price of the stuck-fault gain rather than an overhead to hide.
 Batched throughput reaches {metric('throughput_engines_per_second'):.0f} engines per
 second, so the full 707-engine benchmark evaluates in
 {metric('latency_per_fleet'):.1f} s at batch one. These are wall-clock numbers from

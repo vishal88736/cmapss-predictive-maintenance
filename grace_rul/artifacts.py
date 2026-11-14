@@ -8,7 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from .config import ARCHITECTURE, CORRUPTION_PROTOCOL, FEATURE_COLUMNS, FORMAT_VERSION, POOLED_FORMAT_VERSION, SUPPORTED_ARCHITECTURES
+from .config import (ARCHITECTURE, CORRUPTION_PROTOCOL, FEATURE_COLUMNS, FORMAT_VERSION, POOLED_FORMATS,
+                     SUPPORTED_ARCHITECTURES)
 from .data import FAULTS, WindowDataset, load_subset, select_background_indices, source_hashes, split_engines
 from .training import calibrate, device_for, evaluate, exposure_metrics, fit_corrector, fit_pipeline, interval_bounds, metrics, select_fault_thresholds
 from .training import _Progress, validate_training_config
@@ -191,13 +192,13 @@ def load_bundle(path, device="cpu"):
     if (bundle.get("format_version") not in SUPPORTED_ARCHITECTURES or
             bundle.get("architecture") != SUPPORTED_ARCHITECTURES.get(bundle.get("format_version")) or
             bundle.get("feature_columns") != FEATURE_COLUMNS):
-        raise ValueError("Expected a supported GRACE-RUL format-5/6/7/8/9 artifact. Legacy formats below 5 are incompatible.")
-    pooled = bundle["format_version"] == POOLED_FORMAT_VERSION
+        raise ValueError("Expected a supported GRACE-RUL format-5/6/7/8/9/10 artifact. Legacy formats below 5 are incompatible.")
+    pooled = bundle["format_version"] in POOLED_FORMATS
     expected = {"POOLED"} if pooled else set(bundle["config"]["subsets"])
     if set(bundle["models"]) != expected:
         raise ValueError("Bundle subsets do not match its configuration.")
     if pooled and (bundle.get("training_scope") != "pooled" or bundle.get("requires_subset_label") is not False):
-        raise ValueError("A format-9 shared bundle must declare pooled inference without subset labels.")
+        raise ValueError("A format-9/10 shared bundle must declare pooled inference without subset labels.")
     loaded = {}
     for subset, entry in bundle["models"].items():
         if pooled:
@@ -245,7 +246,9 @@ def load_bundle(path, device="cpu"):
                 raise ValueError("Observable interval scales do not match the saved selection engines.")
         if not all(bool(torch.isfinite(p).all()) for p in model.parameters()):
             raise ValueError("Non-finite model weights.")
-        if not bool(torch.isfinite(model.correction_bound)) or float(model.correction_bound) <= 0:
+        if (not bool(torch.isfinite(model.correction_bound)) or
+                float(model.correction_bound) < 0 or
+                (model.config.get("use_corrector", True) and float(model.correction_bound) == 0)):
             raise ValueError("Invalid selected correction bound.")
         if (entry.get("correction_bound") != float(model.correction_bound) or
                 entry.get("repair_selected") != bool(model.repair_enabled)):

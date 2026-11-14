@@ -264,6 +264,8 @@ def run_pooled_experiment(project_root, config=None, output_dir=None):
         model, scaler, history, upstream = fit_pipeline(fit, val, MODEL_KEY, config, seed,
             checkpoint_path=output / "checkpoints" / f"pipeline_{MODEL_KEY}_{seed}.pt")
         model.scaler = scaler
+        if not config.get("use_corrector", True):
+            model.correction_bound.fill_(0.)
         correction, oof, cross_validation = fit_corrector(model, fit, val, MODEL_KEY, config, seed, checkpoint_dir=output / "checkpoints")
         model.detector_history.to_csv(output / f"detector_history_{MODEL_KEY}_{seed}.csv", index=False)
         write_json(output / f"detector_audit_{MODEL_KEY}_{seed}.json", model.detector_audit)

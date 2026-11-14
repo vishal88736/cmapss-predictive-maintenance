@@ -276,7 +276,9 @@ class WindowDataset(Dataset):
             lag = int(rng.integers(1, min(end, self.config.get("prefix_pair_max_lag", 30)) + 1)) if end else 0
             previous_end = end - lag
             previous, previous_valid = make_window(engine["values"], previous_end, length)
+            previous_damaged, _ = make_window(corrupt, previous_end, length)
             sample.update(previous_reference=torch.from_numpy(previous), previous_valid=torch.from_numpy(previous_valid),
+                previous_x=torch.from_numpy(previous_damaged),
                 previous_target=torch.tensor(min(self.config["train_rul_cap"], float(engine["targets"][previous_end])), dtype=torch.float32),
                 pair_valid=torch.tensor(lag > 0), previous_cycle=int(engine["cycles"][previous_end]))
         return sample

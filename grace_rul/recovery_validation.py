@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 
 from .config import SETTINGS, SENSORS
 from .data import FAULTS, WindowDataset
+from .model import age_from_cycles
 from .normalization import transform_spec
 
 
@@ -314,7 +315,12 @@ def _case_audit(model, dataset, family, severity, config, representation, use_re
         valid = batch["valid"].to(device).bool().unsqueeze(-1).expand_as(reference)
         changed = batch["altered"].to(device).bool() & valid
         intact = ~batch["altered"].to(device).bool() & valid
-        result = model(x, batch["valid"].to(device), use_repair=use_repair, use_correction=False)
+        age = (age_from_cycles(batch.get("cycle"), model.config)
+               if hasattr(model, "config") else None)
+        options = {"use_repair": use_repair, "use_correction": False}
+        if age is not None:
+            options["age"] = age
+        result = model(x, batch["valid"].to(device), **options)
         repaired = result["repaired"]
         if repaired.shape != reference.shape:
             raise ValueError("Recovery validation model returned an unexpected sensor shape.")

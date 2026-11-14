@@ -1,35 +1,35 @@
 {
-  "created_at_utc": "2026-11-09T21:35:23.005254+00:00",
+  "created_at_utc": "2026-11-14T07:14:53.178443+00:00",
   "scope": "Generated from saved ablation measurements; no training, inference or selection.",
-  "run": "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified",
-  "bundle_sha256": "577cf22aec575a40b611c992b87fa3bf57f3a66c2f2f73a66ede3957e3459457",
-  "ablation_run": "artifacts/component_ablation_full",
+  "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114",
+  "bundle_sha256": "e599e6e25002bec42993766e069ebadd746a386e8508b345fc82062779680e99",
+  "ablation_run": "artifacts/ablation_v10_20261114",
   "inputs": {
-    "cmapss-predictive-maintenance/artifacts/component_ablation_full/ablation_summary.csv": {
-      "sha256": "505a0ecceda40721d19915b979edfa0dfca6cbb93c867198b65a468ababd3dbb",
-      "bytes": 4004
+    "cmapss-predictive-maintenance/artifacts/ablation_v10_20261114/ablation_summary.csv": {
+      "sha256": "fcf1648919ffec34197092e0909a512dee26a0ef2b5e737b5979f8ac1eb6c34f",
+      "bytes": 4015
     },
-    "cmapss-predictive-maintenance/artifacts/component_ablation_full/ablation_metrics.csv": {
-      "sha256": "57e6c41c9ee5d178526388e4d6d5d143719c8977bee5b377687fb41c86fc2bed",
-      "bytes": 19527
+    "cmapss-predictive-maintenance/artifacts/ablation_v10_20261114/ablation_metrics.csv": {
+      "sha256": "683f47f2485a9e69cbba9b2757e8eea10aef498c0ffe886995b1d3f14fd3cad2",
+      "bytes": 19570
     },
-    "cmapss-predictive-maintenance/artifacts/component_ablation_full/manifest.json": {
-      "sha256": "2d15a40ca2b0bbf712fc4cb3b69755418edeea84e68316a779dab39c089b981d",
-      "bytes": 1226
+    "cmapss-predictive-maintenance/artifacts/ablation_v10_20261114/manifest.json": {
+      "sha256": "0488e3dc48ca20ad2c2c9f9f0a1ec6e173c90f8c546eaff574217d1e92862628",
+      "bytes": 1207
     }
   },
   "outputs": {
-    "current_ablation_macros.tex": "3696059e9b76995200c2d1eeced3f0239428b995a73fccbeac408f9de86540ce",
-    "current_ablation_section.tex": "d41736d584588d8480c087f43a7e42cad78ef66eacdba5a454a71c54c5faa53a"
+    "current_ablation_macros.tex": "d4bd5992215383f9875b242e4e669fb19f150b81919c1e0df48190ece5c59b22",
+    "current_ablation_section.tex": "2677b133331966dd27c3787c94a9581820a0b126ba8453089be1ba930082cf64"
   },
   "post_freeze_diagnostic": true,
   "deployed_artifact_changed": false,
   "stuck_gains_by_severity": {
-    "0.1": 4.987,
-    "0.2": 4.989,
-    "0.3": 4.022,
-    "0.5": 3.616
+    "0.1": 9.064,
+    "0.2": 10.471,
+    "0.3": 10.061,
+    "0.5": 10.782
   },
-  "corrector_max_abs_delta": 0.03,
-  "clean_mean_interval_width": 68.17
+  "corrector_max_abs_delta": 0.0,
+  "clean_mean_interval_width": 60.32
 }

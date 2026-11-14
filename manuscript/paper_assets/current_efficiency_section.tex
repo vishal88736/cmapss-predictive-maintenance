@@ -9,21 +9,21 @@
 \toprule
 Metric & Value & Scope \\
 \midrule
-Trainable parameters & 348,656 & whole artifact \\
-Parameters: detector / generator / predictor / corrector & 37,909 / 176,533 / 132,005 / 2,209 & per module \\
+Trainable parameters & 348,976 & whole artifact \\
+Parameters: detector / generator / predictor / corrector & 37,909 / 176,533 / 132,325 / 2,209 & per module \\
 Float32 weight size & 1.33 MB & weights only \\
 Multiply-accumulates, full path & 19.4 M & one 70-cycle window \\
-Multiply-accumulates, bypass & 16.7 M & one 70-cycle window \\
-Latency, full path & 5.08 ms & single window, median \\
-Latency, bypass & 3.03 ms & single window, median \\
-Latency, plain predictor & 2.96 ms & single window, median \\
-Throughput & 1285 engines/s & batch 64, full path \\
-Fleet pass & 3.59 s & 707 engines, one window each \\
-Process peak memory & 836 MB & interpreter and torch included \\
+Multiply-accumulates, bypass & 16.8 M & one 70-cycle window \\
+Latency, full path & 4.03 ms & single window, median \\
+Latency, bypass & 2.52 ms & single window, median \\
+Latency, plain predictor & 2.51 ms & single window, median \\
+Throughput & 1519 engines/s & batch 64, full path \\
+Fleet pass & 2.85 s & 707 engines, one window each \\
+Process peak memory & 872 MB & interpreter and torch included \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize Wall-clock measurement of one CPU machine, not a hardware-independent claim; multiply-accumulates are a complexity proxy for supported operations only. The recovery path costs about 67\% latency over bypass and buys the stuck-fault gain in Table~\ref{tab:ablation}. Peak memory includes the Python and PyTorch interpreter, whose baseline is reported in the saved record.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize Wall-clock measurement of one CPU machine, not a hardware-independent claim; multiply-accumulates are a complexity proxy for supported operations only. The recovery path costs about 60\% latency over bypass and buys the stuck-fault gain in Table~\ref{tab:ablation}. Peak memory includes the Python and PyTorch interpreter, whose baseline is reported in the saved record.\end{minipage}
 \end{table*}
 }
 
@@ -31,11 +31,11 @@ Process peak memory & 836 MB & interpreter and torch included \\
 The artifact is small: \CurrentParams{} parameters, 1.33 MB of
 float32 weights, and 19.4 M multiply-accumulates
 per window. A single-window forward pass takes
-5.1 ms on this CPU and the recovery path accounts
-for about 67\%
-of it, which is the price of the stuck-fault gain rather than an overhead to hide.
-Batched throughput reaches 1285 engines per
+4.0 ms on this CPU; the recovery path adds
+about 60\%
+latency over bypass, which is the price of the stuck-fault gain rather than an overhead to hide.
+Batched throughput reaches 1519 engines per
 second, so the full 707-engine benchmark evaluates in
-3.6 s at batch one. These are wall-clock numbers from
+2.9 s at batch one. These are wall-clock numbers from
 one machine; latency and memory are not hardware-independent and the tables report
 no energy measurement.

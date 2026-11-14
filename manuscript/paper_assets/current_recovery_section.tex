@@ -1,4 +1,28 @@
-\subsection{\textbf{Recovery and Detection Benchmark}}
+\newcommand{\CurrentDetectorTable}{%
+\begin{table*}[!t]
+\caption{Held-validation detector operating point at severity 0.2.}
+\label{tab:detector}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llrrr}
+\toprule
+Family & Scope & F1 & Recall & False positive (\%) \\
+\midrule
+clean & none & n/a & n/a & 0.03 \\
+intermittent & missing & n/a & n/a & 0.05 \\
+outage & missing & n/a & n/a & 0.00 \\
+block & missing & n/a & n/a & 0.03 \\
+noise & finite & 0.42 & 0.27 & 0.20 \\
+bias & finite & 0.47 & 0.31 & 0.13 \\
+drift & finite & 0.38 & 0.24 & 0.12 \\
+stuck & finite & 0.66 & 0.55 & 0.40 \\
+mixed & finite & 0.51 & 0.36 & 0.14 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Thresholds are frozen deployment buffers at the 5\% per-channel/context intact false-positive ceiling. Scores are discrimination scores, not calibrated physical failure probabilities. Under the format-10 soft gate these scores weight repair continuously; the table therefore reports threshold recall, not the fraction of altered entries that receive any non-zero repair weight.\end{minipage}
+\end{table*}
+}
 \newcommand{\CurrentRecoveryTable}{%
 \begin{table*}[!t]
 \caption{Post-freeze recovery and detection benchmark by fault family.}
@@ -7,40 +31,50 @@
 \setlength{\tabcolsep}{3pt}
 \begin{tabular}{llrrrrrr}
 \toprule
-Family & Scope & F1 & Recall & Reconst. MAE & Intact disp. & False repair (\%) & Cov. (\%) \\
+Family & Scope & F1 & Recall & Reconst. RMSE & Intact disp. & False repair (\%) & Cov. (\%) \\
 \midrule
-clean & none & n/a & n/a & n/a & 0.002 & 0.1 & 99.3 \\
-intermittent & missing & n/a & n/a & 0.24 & 0.002 & 0.0 & 99.2 \\
-outage & missing & n/a & n/a & 0.23 & 0.000 & 0.0 & 99.1 \\
-block & missing & n/a & n/a & 0.23 & 0.001 & 0.0 & 99.2 \\
-noise & finite & 0.37 & 0.23 & 0.15 & 0.003 & 0.1 & 99.2 \\
-bias & finite & 0.46 & 0.30 & 0.22 & 0.003 & 0.1 & 99.2 \\
-drift & finite & 0.35 & 0.21 & 0.16 & 0.003 & 0.1 & 99.2 \\
-stuck & finite & 0.72 & 0.62 & 1.08 & 0.007 & 0.4 & 96.8 \\
-mixed & finite & 0.57 & 0.41 & 0.43 & 0.004 & 0.1 & 98.7 \\
+clean & none & n/a & n/a & n/a & 0.017 & 0.0 & 98.4 \\
+intermittent & missing & n/a & n/a & 0.46 & 0.021 & 0.1 & 98.5 \\
+outage & missing & n/a & n/a & 0.46 & 0.011 & 0.0 & 98.4 \\
+block & missing & n/a & n/a & 0.45 & 0.019 & 0.0 & 98.6 \\
+noise & finite & 0.42 & 0.27 & 0.22 & 0.019 & 0.2 & 98.4 \\
+bias & finite & 0.47 & 0.31 & 0.26 & 0.022 & 0.1 & 98.5 \\
+drift & finite & 0.38 & 0.24 & 0.19 & 0.020 & 0.1 & 98.7 \\
+stuck & finite & 0.66 & 0.55 & 1.99 & 0.023 & 0.4 & 97.6 \\
+mixed & finite & 0.51 & 0.36 & 0.47 & 0.015 & 0.1 & 98.5 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize Detection is measured on finite altered entries at severity 0.2, averaged over three corruption replicates; it is undefined for missing-entry families, which the availability mask handles instead, so those cells are not applicable rather than zero. Reconstruction and intact displacement are in original-linear sensor units. False repair is the fraction of healthy entries flagged. Nothing was tuned on these values and the deployed artifact is unchanged.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize Detection, false repair and intact displacement use the held selection recovery audit at severity 0.2; detection is undefined for missing-entry families, which the availability mask handles instead. Reconstruction and displacement are original-linear sensor units. Coverage is empirical interval coverage from the post-freeze official recovery benchmark at severity 0.2, where available. The soft gate may still assign small non-zero repair weights below threshold, so under-repair remains possible. Nothing was tuned on these values.\end{minipage}
 \end{table*}
 }
+\subsection{\textbf{Detector Operating Characteristics}}
+\CurrentDetectorTable
+Table~\ref{tab:detector} makes the detector limitation explicit. Clean false
+positives are 0.0322\% of intact entries, but finite-fault recall
+is only 0.24 for drift,
+0.31 for bias, 0.27 for
+noise, and 0.55 for stuck. Recall is low in every
+finite family, so the deployed path misses many genuine deviations rather than
+over-repairing healthy cells.
+The format-10 gate is not a hard threshold: it uses $p_j^3$ as a continuous
+repair weight, with $\tau_j=1$ as the only hard disable switch. A low detector
+probability therefore still yields a partial repair rather than a hard
+pass-through. This mitigates
+but does not remove the under-repair failure mode, and the paper makes no
+universal recovery claim.
 
+\subsection{\textbf{Recovery and Calibration by Fault Family}}
 \CurrentRecoveryTable
-Table~\ref{tab:recovery} opens the recovery black box. Detection is deliberately
-conservative: precision exceeds 0.86 in every finite fault family, but recall
-reaches only 0.21 for
-drift, so most altered entries are left for the generator rather than
-explicitly flagged. stuck is the easiest family (F1
-0.72) and stuck the hardest to
-reconstruct (1.08 original-linear
-MAE), consistent with a held value being ambiguous rather than out of range.
-
-Healthy-sensor protection holds: the worst intact displacement is
-0.007 original-linear units and the worst false-repair fraction is
-0.4\%. Missing-entry families show no detector activity because
-they are routed by the availability mask, and their reconstruction column measures
-imputation of genuinely absent cells. These numbers also expose the stated
-limitation directly: an in-support finite fault with a low detection score is
-under-repaired, and coverage falls to
-96.8\% for stuck faults.
-Detection thresholds were frozen before these values were read.
+Table~\ref{tab:recovery} pairs the detector audit with the complete recovery
+matrix. The worst intact displacement is 0.02521
+original-linear units, and the worst single-window intact RMSE is
+0.06907. Stuck faults are the easiest finite
+family to flag (F1 0.66) but still the hardest to
+reconstruct, consistent with a held value being ambiguous rather than out of
+range. Clean official coverage is 98.4\%; under
+severity-0.2 stuck and mixed faults it is
+97.6\%
+and 98.5\%, respectively.
+All 41 declared contexts completed and passed their
+intact-cell guards.

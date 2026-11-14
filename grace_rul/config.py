@@ -2,14 +2,24 @@
 
 FORMAT_VERSION = 8
 ARCHITECTURE = "fitted-support-tail-identity-guarded-recovery-gated-rul-v8"
+POOLED_FORMATS = {9, 10}
+POOLED_ARCHITECTURES = {
+    9: "pooled-condition-aware-guarded-recovery-rul-v9",
+    10: "pooled-condition-aware-age-continuity-guarded-recovery-rul-v10",
+}
+# The generic pooled trainer remains the format-9 recipe; format 10 is produced
+# only by the explicit repair driver so a fresh pooled run cannot silently claim
+# the age/soft-gate architecture without those components enabled.
 POOLED_FORMAT_VERSION = 9
-POOLED_ARCHITECTURE = "pooled-condition-aware-guarded-recovery-rul-v9"
+POOLED_ARCHITECTURE = POOLED_ARCHITECTURES[POOLED_FORMAT_VERSION]
+POOLED_REPAIR_FORMAT_VERSION = 10
+POOLED_REPAIR_ARCHITECTURE = POOLED_ARCHITECTURES[POOLED_REPAIR_FORMAT_VERSION]
 SUPPORTED_ARCHITECTURES = {
     5: "detector-residual-bilstm-wgan-gated-cnn-gru-transformer-residual-v5",
     6: "asinh-balanced-recovery-gated-cnn-gru-transformer-residual-v6",
     7: "validated-detector-linear-identity-gated-cnn-gru-transformer-residual-v7",
     FORMAT_VERSION: ARCHITECTURE,
-    POOLED_FORMAT_VERSION: POOLED_ARCHITECTURE,
+    **POOLED_ARCHITECTURES,
 }
 CORRUPTION_PROTOCOL = "structured-sensor-faults-v4"
 SETTINGS = [f"setting_{i}" for i in range(1, 4)]
@@ -81,6 +91,15 @@ DEFAULT_CONFIG = {
     "max_reconstruction_rmse": 1.5,
     "max_linear_reconstruction_ratio": 1.0,
     "predictor_family": "gated", "predictor_branch": "both", "equal_fusion": False,
+    # Format-10 repair options. The defaults preserve format-9 behaviour; the
+    # v10 bundle opts in explicitly so old artifacts remain loadable.
+    "age_feature": False, "age_normalizer": 500.0,
+    "soft_gate_temperature": 1.0, "soft_gate_power": 1.0,
+    "soft_gate_respect_disabled": True,
+    "use_corrector": True,
+    "prefix_consistency_path": "clean",
+    "branch_agreement_loss_weight": 0.0,
+    "plateau_calibration": None,
     "train_repair": True,
     "tune_before_training": True, "run_matched_benchmarks": False,
     "run_extended_evaluation": False, "benchmark_tune": True,

@@ -1,4 +1,4 @@
 {
-  "run": "cmapss-predictive-maintenance/artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified",
-  "bundle_sha256": "577cf22aec575a40b611c992b87fa3bf57f3a66c2f2f73a66ede3957e3459457"
+  "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114",
+  "bundle_sha256": "e599e6e25002bec42993766e069ebadd746a386e8508b345fc82062779680e99"
 }

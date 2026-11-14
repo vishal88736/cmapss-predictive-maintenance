@@ -2,7 +2,7 @@
 
 \newcommand{\CurrentPartitionTable}{%
 \begin{table*}[!t]
-\caption{Current pooled engine-disjoint data partitions.}
+\caption{Format-10 pooled engine-disjoint data partitions.}
 \label{tab:pooled_partitions}
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -17,13 +17,13 @@ FD004 & 249 & 199 & 13 & 12 & 25 & 248 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize The 10\% development pool is divided equally between selection and independent calibration; integer rounding gives the exact counts above. Internal observations are fixed-grid prefixes, not independent engines.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize The 10\% development pool is divided equally between selection and independent calibration; integer rounding gives the exact counts above. Internal observations are fixed-grid prefixes, not independent engines. Official test engines are read only after the candidate and calibration are frozen.\end{minipage}
 \end{table*}
 }
 
 \newcommand{\CurrentPooledResultsTable}{%
 \begin{table*}[!t]
-\caption{Current format-9 model: capped-target clean and structured-fault results.}
+\caption{Format-10 model: capped-target clean and structured-fault results.}
 \label{tab:current_pooled}
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -31,11 +31,11 @@ FD004 & 249 & 199 & 13 & 12 & 25 & 248 \\
 \toprule
 Subset & $N_{\rm off}$ & RMSE & MAE & NASA $S$ & Cov. (\%) & Stuck & Mixed & Internal RMSE \\
 \midrule
-POOLED & 707 & 12.01 & 8.52 & 1671.0 & 99.3 & 15.08 & 13.05 & 13.30 \\
-FD001 & 100 & 11.93 & 8.85 & 194.0 & 100.0 & 12.27 & 12.36 & 10.23 \\
-FD002 & 259 & 11.77 & 8.47 & 541.1 & 99.6 & 15.47 & 13.21 & 11.91 \\
-FD003 & 100 & 11.25 & 7.92 & 234.3 & 100.0 & 12.24 & 11.70 & 10.18 \\
-FD004 & 248 & 12.57 & 8.69 & 701.6 & 98.4 & 16.60 & 13.65 & 16.31 \\
+POOLED & 707 & 11.08 & 7.19 & 1665.3 & 98.4 & 12.11 & 11.41 & 12.07 \\
+FD001 & 100 & 10.13 & 7.47 & 147.1 & 99.0 & 11.48 & 10.50 & 9.23 \\
+FD002 & 259 & 11.94 & 7.58 & 663.9 & 98.1 & 12.39 & 12.22 & 9.87 \\
+FD003 & 100 & 9.80 & 6.17 & 227.1 & 99.0 & 10.79 & 9.74 & 8.77 \\
+FD004 & 248 & 10.99 & 7.08 & 627.2 & 98.4 & 12.56 & 11.50 & 15.55 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
@@ -45,21 +45,21 @@ FD004 & 248 & 12.57 & 8.69 & 701.6 & 98.4 & 16.60 & 13.65 & 16.31 \\
 
 \newcommand{\CurrentComparisonTable}{%
 \begin{table*}[!t]
-\caption{Pooled comparison including the immediate preserved source.}
+\caption{Pooled comparison with the preserved v9 source.}
 \label{tab:current_comparison}
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{lrrrrr}
+\begin{tabular}{lrrr}
 \toprule
-Artifact & Official clean RMSE & MAE & Internal clean RMSE & Stuck @0.2 & Stuck all levels \\
+Artifact & Official clean RMSE & Internal clean RMSE & Stuck @0.2 \\
 \midrule
-Original revision 2 & 12.106 & 8.550 & 13.441 & 18.858 & 20.571 \\
-Preserved fine-tuned source & 11.942 & 8.228 & 13.128 & 15.206 & 17.879 \\
-Current frozen repair & 12.008 & 8.522 & 13.297 & 15.077 & 17.664 \\
+Original revision 2 & 12.106 & 13.441 & 18.858 \\
+Preserved v9 source & 12.008 & 13.297 & 15.077 \\
+Format-10 repair & 11.080 & 12.073 & 12.113 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize All rows use their own saved predictions and capped targets. Fault values are arithmetic means across declared corruption realizations; the last column also averages severities. Reused test results are descriptive and do not select the current candidate.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize All rows use their own saved predictions and capped targets. The stuck column uses the common severity-0.2 setting over three corruption realizations; higher-severity v9 values are not mixed in because the format-10 official evaluation was run at severity 0.2 only. The held selection recovery audit still covers all declared severities. v9 test values are reused descriptive evidence and did not select the format-10 candidate.\end{minipage}
 \end{table*}
 }
 
@@ -73,21 +73,21 @@ Current frozen repair & 12.008 & 8.522 & 13.297 & 15.077 & 17.664 \\
 \toprule
 Subset & Raw RMSE & Raw MAE & Raw NASA $S$ & Raw coverage (\%) \\
 \midrule
-POOLED & 22.34 & 14.69 & 9201.9 & 99.3 \\
-FD001 & 13.34 & 9.92 & 226.9 & 99.0 \\
-FD002 & 24.59 & 15.96 & 4660.4 & 99.6 \\
-FD003 & 13.11 & 9.48 & 277.2 & 100.0 \\
-FD004 & 25.49 & 17.38 & 4037.4 & 98.8 \\
+POOLED & 21.27 & 13.35 & 10118.0 & 99.3 \\
+FD001 & 11.51 & 8.54 & 173.7 & 99.0 \\
+FD002 & 24.16 & 15.07 & 6163.5 & 98.8 \\
+FD003 & 11.48 & 7.73 & 258.7 & 100.0 \\
+FD004 & 23.95 & 15.77 & 3522.1 & 99.6 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize The point model was trained on capped targets. Raw errors and separately calibrated raw intervals expose long-horizon limitations; capped coverage must not be presented as raw-target coverage.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize The point model is trained on capped targets. A monotone plateau stretch was evaluated on held selection engines but was not applied because no positive value respected the non-increasing capped-RMSE guard. Raw errors therefore expose the censoring limitation rather than a solved long-horizon task. Raw coverage uses separately calibrated intervals and must not be read as capped-target coverage.\end{minipage}
 \end{table*}
 }
 
 \newcommand{\CurrentAdaptiveCalibrationTable}{%
 \begin{table*}[!t]
-\caption{Observable interval scales and radii of the frozen model.}
+\caption{Observable interval scales and radii of the frozen format-10 model.}
 \label{tab:adaptive_calibration}
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -95,13 +95,59 @@ FD004 & 25.49 & 17.38 & 4037.4 & 98.8 \\
 \toprule
 Predicted RUL bin & Scale capped & Scale raw & Radius capped & Radius raw & Scale engines \\
 \midrule
-$[0,35)$ & 3.86 & 3.86 & 15.14 & 14.23 & 36 \\
-$[35,75)$ & 8.60 & 8.60 & 33.69 & 31.66 & 36 \\
-$[75,125)$ & 11.14 & 81.97 & 43.68 & 301.93 & 36 \\
-$[125,\infty)$ & 1.00 & 175.52 & 3.92 & 646.53 & 24 \\
+$[0,35)$ & 3.93 & 3.93 & 16.55 & 16.01 & 36 \\
+$[35,75)$ & 6.01 & 6.01 & 25.32 & 24.50 & 36 \\
+$[75,125)$ & 9.24 & 81.24 & 38.95 & 331.35 & 36 \\
+$[125,\infty)$ & 1.00 & 138.20 & 4.22 & 563.69 & 35 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize Scales use selection engines only. A single engine-maximum normalized score across all bins is calibrated on 35 separate engines; alpha=0.1, rank=33. Scale-engine counts are overlapping bin support, not independent calibration sample counts. No true RUL is required to choose a bin at inference.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize Scales use selection engines only. A single engine-maximum normalized score spans all bins and is calibrated on 35 separate engines; alpha=0.1, rank=33. Scale-engine counts are overlapping bin support, not independent calibration sample counts. No true RUL is required to choose a bin at inference.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\CurrentLongRULTable}{%
+\begin{table*}[!t]
+\caption{Clean official long-horizon behaviour.}
+\label{tab:current_long}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lr}
+\toprule
+Quantity & Value \\
+\midrule
+Raw RMSE (cycles) & 21.27 \\
+Capped RMSE (cycles) & 11.08 \\
+Engines with raw RUL $>125$ & 150/707 (21.2\%) \\
+Long-engine mean prediction & 118.41 \\
+Long-engine mean target & 154.07 \\
+Long-engine share of raw squared error & 77.7\% \\
+Worst engine maximum absolute error & 102.05 \\
+Engines with max error $>40$ cycles & 65/707 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Plateau stretch $\alpha=0.000$ above 100 cycles, selected on held validation engines under a non-increasing capped-RMSE guard; $\alpha=0$ means the guard rejected every positive stretch. Engine bootstrap 95\% intervals for capped RMSE are [10.23, 11.96] and for raw RMSE [19.80, 22.77] (whole-engine resampling). Any positive stretch is monotone but cannot recover an individual engine's unknown censored target.\end{minipage}
+\end{table*}
+}
+
+\newcommand{\CurrentIntervalBandTable}{%
+\begin{table*}[!t]
+\caption{Clean official coverage and width by observable RUL band.}
+\label{tab:interval_bands}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrr}
+\toprule
+Raw-RUL band & $N$ & Capped cov. (\%) & Capped width & Raw cov. (\%) & Raw width \\
+\midrule
+0--35 & 171 & 100.0 & 30.9 & 100.0 & 30.1 \\
+35--75 & 144 & 97.2 & 53.1 & 100.0 & 97.3 \\
+75--125 & 242 & 97.9 & 75.3 & 97.9 & 396.8 \\
+$\geq125$ & 150 & 98.7 & 76.5 & 100.0 & 454.4 \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}
+\begin{minipage}{\textwidth}\scriptsize Bands are chosen from the raw target for description only; inference uses the predicted-RUL bin. Coverage is marginal over engines and prefixes, not conditional on a realized engine. Raw width can be unbounded; mean widths include finite values only and are descriptive.\end{minipage}
 \end{table*}
 }

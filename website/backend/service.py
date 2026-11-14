@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 import torch
 from grace_rul.artifacts import load_bundle
-from grace_rul.config import DEFAULT_CONFIG, FORMAT_VERSION, POOLED_FORMAT_VERSION, SUPPORTED_ARCHITECTURES, SENSOR_NAMES, SENSORS
+from grace_rul.config import (DEFAULT_CONFIG, FORMAT_VERSION, POOLED_FORMATS,
+                              SUPPORTED_ARCHITECTURES, SENSOR_NAMES, SENSORS)
 from grace_rul.data import make_window
 from grace_rul.model import has_finite_fault_detector
 from grace_rul.explain import explain_window
@@ -85,7 +86,7 @@ class InferenceService:
         for path in root.glob("*/grace_rul_ALL.pt"):
             try:
                 meta = json.loads((path.parent / "run_manifest.json").read_text())
-                if meta.get("format_version") == POOLED_FORMAT_VERSION and meta.get("status") != "complete":
+                if meta.get("format_version") in POOLED_FORMATS and meta.get("status") != "complete":
                     continue
                 if meta.get("format_version") in SUPPORTED_ARCHITECTURES and meta.get("quick_run") is False:
                     candidates.append(path)

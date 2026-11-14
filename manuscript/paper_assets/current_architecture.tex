@@ -1,4 +1,4 @@
-% Shared format-9 inference architecture; native IEEE figure.
+% Shared format-10 inference architecture; native IEEE figure.
 \begin{figure*}[!t]
 \centering
 \begin{tikzpicture}[y=.94cm,
@@ -15,9 +15,9 @@
 \draw[link] (detect)-- node[note,above] {$p$} (generator);
 \draw[link] (scale.north)--++(0,.55)-| node[note,pos=.52,above] {Shared $S,M,U$} (generator.north);
 
-\node[box,minimum height=1.75cm] (blend) at (14.5,-2.0) {Selective repair proposal\\Finite: $p_j\geq\tau_j$, $\tau_j<1$\\Missing: $W_j=1$\\$\widetilde R=(1-W)S+WG$};
+\node[box,minimum height=1.75cm] (blend) at (14.5,-2.0) {Selective repair proposal\\Soft gate: $p_j^{3}$\\Missing: $W_j=1$\\$\widetilde R=(1-W)S+WG$};
 \node[box,minimum height=1.85cm] (bound) at (10.2,-2.0) {Fitting-support directed bound\\$R=\Pi_{\rm fit}(\widetilde R;S)$\\Inlier: $|\Delta z|\leq0.15$\\Outlier: inward recovery allowed\\Missing proposals pass through};
-\node[box] (features) at (6.0,-2.0) {Predictor measurements\\$[R,U,M,W]$: 66 features\\Observed bypass path available};
+\node[box] (features) at (6.0,-2.0) {Predictor measurements\\$[R,U,M,W]$: 66 features\\plus observed engine age: 67\\Observed bypass path available};
 \node[box,minimum height=1.75cm] (quality) at (1.8,-2.0) {Observable quality $q\in\mathbb R^{64}$\\Mean availability; repair weights;\\actual $|R-S|$;\\observed-history fraction};
 \draw[link] (generator)--(blend);
 \draw[link] (blend)--(bound);
@@ -29,8 +29,8 @@
 \draw[link] (features.south)--++(0,-.25)-| (local.north);
 \draw[link] (features.south)--++(0,-.25)-| (global.north);
 \node[box,minimum height=1.75cm] (fusion) at (6.0,-6.0) {Quality-conditioned fusion\\$(g_\ell,g_g)=f(h_\ell,h_g,q)$\\Softmax mixing weights\\$h=g_\ell h_\ell+g_g h_g$};
-\node[box,minimum height=1.75cm] (heads) at (10.2,-6.0) {Base + auxiliary RUL heads\\Base $\hat y_0$; local/global estimates\\Quality $q$ also goes to corrector};
-\node[box,minimum height=1.75cm] (corrector) at (14.5,-6.0) {Bounded OOF residual corrector\\67 features: $q$ + 3 scaled RULs\\$\Delta=b\tanh(f_c)$\\Zero-correction fallback};
+\node[box,minimum height=1.75cm] (heads) at (10.2,-6.0) {Base + auxiliary RUL heads\\Base $\hat y_0$; local/global estimates\\Quality $q$ and age retained};
+\node[box,minimum height=1.75cm] (corrector) at (14.5,-6.0) {Disabled bounded corrector\\Null component ablation\\$\Delta\equiv0$ in format 10};
 \draw[link] (local.south)--(fusion.north west);
 \draw[link] (global.south)--(fusion.north east);
 \draw[link] (quality.south)|-(fusion.west);
@@ -39,9 +39,9 @@
 
 \node[train] (tail) at (3.9,-8.4) {\textbf{Training only: tail loss}\\Upper-tail window/channel identity\\uses \emph{unbounded} $\widetilde R$ and intact labels.\\Mean identity uses bounded $R$.};
 \node[train] (critic) at (9.1,-8.4) {\textbf{Training only: WGAN-GP}\\Conditional CNN--LSTM critic\\receives bounded $R$ or reference sensors\\and settings $U$; updates generator.};
-\node[box,minimum height=1.75cm] (output) at (14.5,-8.4) {Final RUL $\max(0,\hat y_0+\Delta)$\\Separate capped/raw intervals\\Independent calibration engines};
+\node[box,minimum height=1.75cm] (output) at (14.5,-8.4) {Final RUL $\max(0,\hat y_0)$\\plateau stretch inactive ($\alpha=0$)\\Separate capped/raw intervals};
 \draw[link] (corrector)--(output);
 \end{tikzpicture}
-\caption{Shared format-9 computation for every source subset; a subset label is not an inference input. The directed bound acts in original, uncompressed regime-standardized sensor coordinates $z$, using fitting-only support. The 0.15 budget applies to observations inside that support; large outliers can move inward without a universal small-step cap. The detector and generator remain frozen during the reported predictor refinement. Dashed components describe source recovery training, and the WGAN critic is absent at deployment. Deterministic paired-prefix and fitting-tail objectives refine the predictor without adding a hard inference floor or monotonic constraint. Altered-entry labels and targets never enter deployment.}
+\caption{Shared format-10 computation for every source subset; a subset label is not an inference input. The directed bound acts in original, uncompressed regime-standardized sensor coordinates $z$, using fitting-only support. The 0.15 budget applies to observations inside that support; large outliers can move inward without a universal small-step cap. The finite-fault gate is probability-weighted, with $\tau_j=1$ as the only hard channel disable. The predictor receives an observed-cycle age channel. The detector and generator remain frozen during the reported predictor refinement. Dashed components describe source recovery training, and the WGAN critic is absent at deployment. Active-path paired-prefix and fitting-tail objectives refine the predictor without adding a hard inference floor or monotonic constraint. Altered-entry labels and targets never enter deployment.}
 \label{fig:architecture}
 \end{figure*}

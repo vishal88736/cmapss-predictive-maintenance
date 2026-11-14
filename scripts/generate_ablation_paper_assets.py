@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PAPER = ROOT.parent
 OUT = PAPER / "paper_assets"
 FAMILIES = ["intermittent", "outage", "block", "noise", "bias", "drift", "stuck", "mixed"]
-COLUMNS = {"full": "Full", "bypass": r"$-$Recovery", "no_correction": r"$-$Corrector", "plain": "Neither"}
+COLUMNS = {"full": "Full", "bypass": r"$-$Recovery", "plain": "Neither"}
 
 
 def sha(path):
@@ -41,6 +41,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ablation-run", type=Path, default=ROOT / "artifacts/component_ablation_full")
     args = parser.parse_args(argv)
+    args.ablation_run = args.ablation_run.resolve()
     manifest = json.loads((args.ablation_run / "manifest.json").read_text())
     pointer = json.loads((OUT / "current_run.json").read_text())
     if manifest["bundle_sha256"] != pointer["bundle_sha256"]:
@@ -59,19 +60,19 @@ def main(argv=None):
         full = value(condition, "full", "RMSE")
         bypass = value(condition, "bypass", "RMSE")
         rows.append([family, f"{full:.2f}", f"{bypass:.2f}",
-                     f"{value(condition, 'no_correction', 'RMSE'):.2f}",
                      f"{value(condition, 'plain', 'RMSE'):.2f}",
                      f"{100 * value(condition, 'full', 'interval_coverage'):.1f}",
                      f"{value(condition, 'full', 'mean_interval_width'):.1f}"])
     ablation_table = table("CurrentAblationTable",
         "Post-freeze component ablation of one unchanged artifact.",
-        "tab:ablation", "lrrrrrr",
-        r"Condition & Full & $-$Recovery & $-$Corrector & Neither & Cov. (\%) & Width", rows,
-        r"All four columns use the same weights, scaler, detector thresholds and interval radius; only "
+        "tab:ablation", "lrrrrr",
+        r"Condition & Full & $-$Recovery & Neither & Cov. (\%) & Width", rows,
+        r"All columns use the same weights, scaler, detector thresholds and interval radius; only "
         r"the inference switches differ. Fault rows average three corruption replicates, clean has none. "
         r"Nothing was selected, removed or retuned from these values, and the deployed artifact is "
-        r"unchanged. Coverage and mean width are for the full path under the frozen radius. Official "
-        r"benchmarks were inspected in earlier development, so this is a diagnostic, not a holdout.")
+        r"unchanged. The corrector is disabled in format 10, so a separate $-$Corrector column would be "
+        r"identical to Full. Coverage and mean width are for the full path under the frozen radius. "
+        r"Official benchmarks were inspected in earlier development, so this is a diagnostic, not a holdout.")
 
     gains = {severity: value(f"stuck@{severity}", "bypass", "RMSE") - value(f"stuck@{severity}", "full", "RMSE")
              for severity in ("0.1", "0.2", "0.3", "0.5")}
@@ -79,6 +80,9 @@ def main(argv=None):
     stuck_full = value("stuck@0.2", "full", "RMSE")
     stuck_bypass = value("stuck@0.2", "bypass", "RMSE")
     mixed_gain = value("mixed@0.2", "bypass", "RMSE") - value("mixed@0.2", "full", "RMSE")
+    outage_gain = value("outage@0.2", "bypass", "RMSE") - value("outage@0.2", "full", "RMSE")
+    block_gain = value("block@0.2", "bypass", "RMSE") - value("block@0.2", "full", "RMSE")
+    noise_gain = value("noise@0.2", "bypass", "RMSE") - value("noise@0.2", "full", "RMSE")
     corrector_delta = max(abs(value(c, "no_correction", "RMSE") - value(c, "full", "RMSE"))
                           for c in ["clean", *[f"{f}@0.2" for f in FAMILIES]])
     width = value("clean", "full", "mean_interval_width")
@@ -93,6 +97,9 @@ def main(argv=None):
         "CurrentAblationStuckGainLow": f"{gains['0.1']:.2f}",
         "CurrentAblationStuckGainHigh": f"{gains['0.5']:.2f}",
         "CurrentAblationMixedGain": f"{mixed_gain:.2f}",
+        "CurrentAblationOutageGain": f"{outage_gain:.2f}",
+        "CurrentAblationBlockGain": f"{block_gain:.2f}",
+        "CurrentAblationNoiseGain": f"{noise_gain:.2f}",
         "CurrentAblationCorrectorDelta": f"{corrector_delta:.2f}",
         "CurrentAblationWidth": f"{width:.1f}",
         "CurrentAblationCoverage": f"{coverage:.1f}",
@@ -111,17 +118,21 @@ effect, and only under persistent faults: stuck-fault RMSE falls from
 (\CurrentAblationStuckGain{{}}) at severity 0.2, the gain stays between
 \CurrentAblationStuckGainHigh{{}} and \CurrentAblationStuckGainLow{{}} across
 severities 0.1--0.5, and mixed faults improve by
-\CurrentAblationMixedGain{{}}. Outage and block faults gain about 0.3 cycles.
-Broadband noise gains nothing measurable, which is expected because recovery
-targets finite abnormal readings rather than additive measurement error.
-
-The bounded observable corrector does not earn its place on accuracy: removing it
-changes RMSE by at most \CurrentAblationCorrectorDelta{{}} cycles in any tested
-condition, and never for the worse. On clean endpoints the full path gives
+\CurrentAblationMixedGain{{}}. Outage and block faults gain
+\CurrentAblationOutageGain{{}} and \CurrentAblationBlockGain{{}} cycles,
+respectively. Broadband noise gains only \CurrentAblationNoiseGain{{}} cycles,
+consistent with recovery targeting persistent abnormal readings rather than
+additive measurement error. On clean endpoints the full path gives
 \CurrentAblationCleanFull{{}} against \CurrentAblationCleanPlain{{}} for the
-branch-fusion predictor with neither intervention. The corrector is retained
-because it belongs to the frozen artifact whose validation guards passed, not
-because it lowers RUL error, and the manuscript does not claim otherwise.
+branch-fusion predictor with neither intervention, so the recovery path is not
+free when no fault is present.
+
+The bounded observable corrector is disabled in format 10: its exported bound is
+zero, so removing it changes RMSE by \CurrentAblationCorrectorDelta{{}} cycles by
+construction. The source artifact's earlier null ablation, where removal changed
+RMSE by at most 0.02 cycles and never for the worse, motivated this choice. No
+corrector adjustment is present in the reported RUL, and the manuscript makes no
+claim that the corrector improves accuracy.
 
 The same table pairs coverage with sharpness. The mean clean official interval is
 \CurrentAblationWidth{{}} cycles wide against a 125-cycle target, so

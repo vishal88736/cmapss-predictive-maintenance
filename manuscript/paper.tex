@@ -35,8 +35,8 @@
 
 \begin{document}
 
-\title{Assurance-Aware Remaining Useful Life Prediction Under Correlated Sensor Failures for Turbofan Engines\\
-\thanks{This manuscript presents the assurance-aware prognostic architecture along with empirical evaluation on reference and structured sensor-fault NASA C-MAPSS telemetry, including observed recovery limitations.}
+\title{Auditable Remaining Useful Life Prediction Under Correlated Sensor Failures: Guarded Recovery for Turbofan Engines\\
+\thanks{This manuscript presents an auditable prognostic pipeline and an empirical evaluation on reference and structured sensor-fault NASA C-MAPSS telemetry, including observed recovery limitations and an explicit failure analysis.}
 }
 
 \author{\IEEEauthorblockN{Devanshu Verma}
@@ -76,16 +76,18 @@ incidents~\cite{saxena2008damage}.
 
 GRACE-RUL is organized around three design commitments: local
 convolutional--recurrent modeling of recent degradation, selective recurrent
-recovery of corrupted readings, and a Transformer context branch with residual
-compensation. The current format-9 implementation uses one shared model across
+recovery of corrupted readings, and a Transformer context branch. The current
+format-10 implementation adds an observed engine-age
+channel and a probability-weighted finite-repair gate to one shared model across
 FD001--FD004, without requiring a subset label at deployment. Its contributions
 are a prefix-consistent related-channel fault simulator; independent finite-fault
-detection with selective, support-bounded repair; quality-conditioned local/global
+detection with soft, support-bounded repair; quality-conditioned local/global
 RUL fusion; validation-led predictor refinement; independently calibrated
 observable intervals; and a broadband measurement-noise and channel-dropout
-benchmark that reports accuracy and calibrated coverage without refitting. Complete recovery checks and state-bound audits make the
-selected path inspectable. Severe prediction failures, reused benchmarks and
-unvalidated fleet assumptions are retained explicitly in the evidence.
+benchmark that reports accuracy and calibrated coverage without refitting.
+Complete recovery checks and state-bound audits make the selected path
+inspectable. Severe prediction failures, reused benchmarks and unvalidated fleet
+assumptions are retained explicitly in the evidence.
 
 \section{\textbf{Related Work}}
 \label{sec:related_work}
@@ -96,13 +98,14 @@ The supplied hybrid CNN--GRU study emphasizes local feature extraction, temporal
 The partial-failure study motivates paired corrupted/reference histories, bidirectional recurrent recovery, and a training-only adversarial critic \cite{tang2026deep}. The implementation adds a deployment-available finite-fault detector and availability-based selective blending, because synthetic altered-entry labels are unavailable at inference. WGAN-GP supplies the adversarial training objective \cite{gulrajani2017improved}. Original C-MAPSS readings remain noisy reference measurements, rather than pristine sensor truth.
 
 \subsection{\textbf{Transformer Context and Residual Compensation}}
-Trans-D3 motivates combining a Transformer representation with prediction correction \cite{paredes2026trans}. The current implementation instead uses an OOF-trained supervised residual MLP with bounded output together with physical degradation slew and anti-rebound loss penalties on paired engine prefixes. It contains no TD3 actor, twin action-value critics, replay buffer, policy update, or LQR filter. The separate WGAN critic evaluates sensor sequences during recovery training and is unrelated to reinforcement learning.
+Trans-D3 motivates combining a Transformer representation with prediction correction \cite{paredes2026trans}. The current implementation instead uses a bounded supervised residual MLP only as a retained, zero-bound ablation artifact; after a null component ablation it is disabled in the deployed format-10 path, so the final RUL is the branch-fusion base prediction. The study also uses physical degradation slew and anti-rebound loss penalties on paired engine prefixes. It contains no TD3 actor, twin action-value critics, replay buffer, policy update, or LQR filter. The separate WGAN critic evaluates sensor sequences during recovery training and is unrelated to reinforcement learning.
 
 \section{\textbf{Problem Statement and Data Protocol}}
 \label{sec:problem_statement}
 \subsection{\textbf{Observed Histories, Targets and Masks}}
-An observation contains three operating settings and 21 sensors. Engine ID and
-cycle order trajectories; neither is a neural feature. A window ending at $t$
+An observation contains three operating settings and 21 sensors. Engine ID is
+never a neural feature; the observed cycle index is used only to derive the
+normalized age channel in format 10. A window ending at $t$
 contains at most $L=\CurrentGlobalLength$ already observed cycles, left-padded to
 fixed length. Validity $V$ masks padding and availability $M$ marks finite sensor
 readings. Normalized settings are $U$ and encoded observed sensors are $S$;
@@ -192,18 +195,28 @@ The detector receives $[S,M,U]$ (45 features per cycle). Parallel kernel-three a
 
 Only finite, real entries train the classifier. For each sensor, binary cross entropy is averaged separately over present altered and intact classes, those present-class means are averaged, and sensor losses are then averaged. Missing readings do not become finite-fault positives. The detector is fitted independently on fitting engines using clean and all fault/mixed contexts. Validation selects its checkpoint and representable sensor thresholds $\tau_j$, subject to at most 5\% empirical intact false positives in each validation channel/context. Scores are not calibrated physical failure probabilities.
 
-The deployed gate retains a conservative threshold floor and tightens only channels that violate a source/context false-positive bound on held selection engines. Its current audit binds the actual thresholds and detector state; previous detector metrics remain explicitly historical. The detector is frozen during generator, joint and predictor-refinement training. Detached scores drive the generator and recovery gates, so RUL/reconstruction gradients cannot redefine fault classification. Threshold $\tau_j=1$ explicitly disables finite repair, including when sigmoid rounds to one.
+The format-10 deployed gate uses $p_j^3$ as a continuous finite-repair weight rather than a binary threshold crossing, with $\tau_j=1$ as the only hard channel disable. The cubic power was fixed by a held-validation sweep: power 1.0 failed the FD003 noise recovery guard, whereas power 3.0 preserved it while improving clean and stuck validation. This soft gate mitigates, but does not remove, the low-recall failure mode.
 
-\subsection{\textbf{Residual Generation and Thresholded Proposal}}
+The deployed threshold vector starts from a conservative floor and tightens only
+channels that violate a source/context false-positive bound on held selection
+engines; under the soft gate it acts only as the channel-disable mask. Its
+current audit binds the actual thresholds and detector state; previous detector
+metrics remain explicitly historical. The detector is frozen during generator,
+joint and predictor-refinement training. Detached scores drive the generator and
+recovery gates, so RUL/reconstruction gradients cannot redefine fault
+classification. Threshold $\tau_j=1$ explicitly disables finite repair, including
+when sigmoid rounds to one.
+
+\subsection{\textbf{Residual Generation and Soft Proposal}}
 A two-layer bidirectional LSTM with hidden size 64 per direction receives $[S,M,p,U]$ (66 features). A $128\rightarrow64\rightarrow21$ ReLU decoder, initialized with a zero final layer, produces
 \begin{align}
  G&=S+f_{\mathrm{BiLSTM}}([S,M,\operatorname{sg}(p),U]),\\
- \bar p_j&=\operatorname{sg}(p_j)\,\mathbf{1}\{p_j\geq\tau_j,\tau_j<1\},\\
+ \bar p_j&=\operatorname{sg}(p_j)^{3}\,\mathbf{1}\{\tau_j<1\},\\
  W&=(1-M)+M\odot\bar p,\\
  R^\star&=(1-W)\odot S+W\odot G.
  \label{eq:recovery}
 \end{align}
-Here $\operatorname{sg}$ stops gradients. Missing entries route to $G$; finite readings require the selected detector gate. The generator residual is unconstrained internally, but the deployed finite proposal is subsequently bounded. A bypass sets $R=S$ and supplies zero recovery weights to the predictor. All stages exclude padding.
+Here $\operatorname{sg}$ stops gradients. Missing entries route to $G$; finite readings are weighted continuously by the cubic detector score, with $\tau_j=1$ as the only hard channel disable. The generator residual is unconstrained internally, but the deployed finite proposal is subsequently bounded. A bypass sets $R=S$ and supplies zero recovery weights to the predictor. All stages exclude padding.
 
 \subsection{\textbf{Fitting-Support Guard for Finite Readings}}
 Let $x=\phi^{-1}(S_j)$ be a finite observed standardized reading, and let $[\ell,u]$ be its fitting support in the selected regime. With existing displacement budget $\varepsilon=0.15$, define
@@ -229,7 +242,7 @@ This is a conditional guarantee about an observed inlier, including a genuinely 
 \input{paper_assets/current_architecture.tex}
 
 \subsection{\textbf{Local and Global Prognostic Branches}}
-The predictor receives $[R,U,M,W]$ (66 features). Its local branch uses the last 30 cycles: parallel kernel-three/five convolutions with 32 channels each, GRU-64, and a $64\rightarrow64$ last-valid-output projection. Repaired local values may depend on the entire observed recovery window. The global branch projects the 70-cycle input to 64 dimensions, adds sinusoidal positions, and uses two Transformer encoder layers with four heads, feed-forward width 128, GELU and dropout 0.2. Padding is masked; the last valid token represents global context.
+The predictor receives $[R,U,M,W]$ (66 features) together with one normalized observed-cycle age channel (67 features in format 10). Its local branch uses the last 30 cycles: parallel kernel-three/five convolutions with 32 channels each, GRU-64, and a $64\rightarrow64$ last-valid-output projection. Repaired local values may depend on the entire observed recovery window. The global branch projects the 70-cycle input to 64 dimensions, adds sinusoidal positions, and uses two Transformer encoder layers with four heads, feed-forward width 128, GELU and dropout 0.2. Padding is masked; the last valid token represents global context.
 
 \subsection{\textbf{Quality Fusion and RUL Heads}}
 The quality vector $q\in\mathbb{R}^{64}$ concatenates time-mean availability (21), recovery weights (21), absolute actual changes $|R-S|$ (21), and observed-history fraction (one). A $192\rightarrow32\rightarrow2$ gate combines local and global features:
@@ -240,17 +253,17 @@ The quality vector $q\in\mathbb{R}^{64}$ concatenates time-mean availability (21
 \end{align}
 The main head has ReLU/dropout 0.2. Separate 64-to-one auxiliary heads supervise the two branches. Fusion coefficients are learned mixing weights, not certified reliability estimates.
 
-\subsection{\textbf{Observable OOF Bounded Corrector}}
-The corrector receives $q$, normalized base RUL, and the two normalized auxiliary predictions: 67 observable features. A $67\rightarrow32\rightarrow1$ ReLU MLP gives
+\subsection{\textbf{Disabled Bounded Corrector}}
+The source artifact contains a corrector that receives $q$, normalized base RUL, and the two normalized auxiliary predictions: 67 observable features. A $67\rightarrow32\rightarrow1$ ReLU MLP would give
 \begin{equation}
  \Delta=b\tanh(f_c(\cdot)),\qquad
  \hat y=\max(0,\hat y_0+\Delta).
  \label{eq:correction}
 \end{equation}
-Validation selects $b\in\{5,10,15,30\}$ or a zero-correction fallback. This bounds the adjustment, not total RUL or temporal prediction changes. The corrector receives neither labels nor engine indices as features. OOF construction excludes held engines from temporary upstream fitting and inner validation; independently learned hidden embeddings are excluded because their coordinate bases need not agree.
+In format 10 the exported bound is $b=0$, so $\Delta\equiv0$ and the deployed prediction is the branch-fusion base. The head is retained only to load the source state and to make the null ablation auditable; it is not part of the reported computation. The source validation selected $b\in\{5,10,15,30\}$ or a zero-correction fallback, but removing the corrector changed RMSE by at most 0.02 cycles in the source artifact and never for the worse. The corrector receives neither labels nor engine indices as features. Its historical OOF construction excluded held engines from temporary upstream fitting and inner validation; independently learned hidden embeddings were excluded because their coordinate bases need not agree.
 
 \subsection{\textbf{Training-Only Critic and Model Size}}
-A conditional critic consumes reference/repaired sensors plus settings (24 features). Kernel-three convolutions $24\rightarrow32\rightarrow64$ with LeakyReLU 0.2 precede LSTM-64 and a scalar head. It supplies WGAN-GP feedback during training and is absent at deployment. Detector, generator, predictor and corrector contain \CurrentDetectorParameters{}, \CurrentGeneratorParameters{}, \CurrentPredictorParameters{} and \CurrentCorrectorParameters{} learned parameters, respectively: \CurrentNeuralParameters{} shared parameters in total. The separate critic is absent at inference. Support and thresholds are fitted buffers rather than additional learned parameters.
+A conditional critic consumes reference/repaired sensors plus settings (24 features). Kernel-three convolutions $24\rightarrow32\rightarrow64$ with LeakyReLU 0.2 precede LSTM-64 and a scalar head. It supplies WGAN-GP feedback during training and is absent at deployment. Detector, generator, predictor and retained corrector hold \CurrentDetectorParameters{}, \CurrentGeneratorParameters{}, \CurrentPredictorParameters{} and \CurrentCorrectorParameters{} stored tensor elements, respectively, with the predictor's fixed positional buffer accounting for 4,480. The exported artifact therefore has \CurrentParams{} trainable parameters. The corrector bound is zero, so its stored head contributes no RUL adjustment. The separate critic is absent at inference. Support and thresholds are fitted buffers rather than additional learned parameters.
 
 \section{\textbf{Training and Validation-Led Repair}}
 \label{sec:workflow}
@@ -268,12 +281,12 @@ The generator adversarial objective is $-\mathbb E D(R,U)$. These source stages
 also supervise RUL and auxiliary heads. A fitting-only support projection bounds
 finite proposals; sensor labels supervise training, not the deployed gate.
 
-Three fitting-engine OOF folds supply observable correction features. Each held
-fold is excluded from its temporary scaler/upstream fitting and inner selection.
-The bounded MLP corrector is a supervised adaptation of residual compensation;
-it is not a TD3 policy. The source corrector is frozen and revalidated during
-predictor refinement. Its historical OOF training does not establish nested
-cross-validation of the changed final pipeline.
+The source artifact used three fitting-engine OOF folds to supply observable
+correction features. Each held fold was excluded from its temporary scaler,
+upstream fitting and inner selection. The bounded MLP corrector is a supervised
+adaptation of residual compensation, not a TD3 policy. In format 10 the corrector
+is frozen with a zero bound and contributes no adjustment; its historical OOF
+training does not establish nested cross-validation of the changed final pipeline.
 
 \subsection{\textbf{Deterministic Continuity and Fitting-Error Tails}}
 Predictor refinement freezes detector, generator and corrector parameters. It
@@ -297,21 +310,20 @@ active corrupted-RUL losses. Its weights and draw budget are serialized with
 optimizer/scheduler/RNG state in resumable epoch checkpoints. No true target,
 engine-specific rule or hand-assigned accuracy enters deployment.
 
-\subsection{\textbf{Thresholds and Candidate Acceptance}}
-A declared conservative finite threshold floor is preserved. For a violating
-source/channel/context, the smallest representable score boundary that satisfies
-the empirical false-positive guard tightens that channel; already disabled
-channels stay disabled. This preserves useful repair opportunities while exposing
-source-specific false alarms. Detector scores are discrimination scores, not
-calibrated probabilities of physical failure.
+\subsection{\textbf{Soft Gate and Candidate Acceptance}}
+The format-10 gate uses $\tau_j=1$ as the only hard channel disable and
+$p_j^3$ as the finite-repair weight. The power was fixed by a held-validation
+sweep: power 1.0 violated the FD003 noise recovery guard, while power 3.0
+preserved it and improved clean and stuck validation. Detector scores remain
+discrimination scores, not calibrated probabilities of physical failure.
 
-Every candidate must keep pooled and per-source clean RMSE/NASA within the
-original 3\%/10\% budgets and retain sensor-reconstruction/intact guards.
-Mixed and stuck RUL also remain within 3\% of the preserved source, pooled and
-per source. Selection minimizes the mean worst-decile engine maximum-prefix
-absolute error, with clean RMSE as a tie-breaker. Source references remain fixed;
-each stage cannot spend a new tolerance. The complete recovery matrix contains
-clean once plus eight fault/mixed families at severities 0.1--0.5, totaling
+Every candidate must keep clean RMSE within 1\%, clean mean NASA score within
+5\%, mixed RMSE within 2\%, stuck RMSE within 2\% and the engine-tail score
+within 2\% of the preserved source on held selection engines. Selection
+minimizes a weighted combination of clean, mixed, stuck and tail validation
+scores. Source references remain fixed; a later stage cannot spend a new
+tolerance. The complete recovery matrix contains clean once plus eight
+fault/mixed families at severities 0.1--0.5, totaling
 \CurrentRecoveryContexts{} contexts. Incomplete or rejected scans cannot certify
 an export. All diagnostics and failure flags are retained.
 
@@ -337,11 +349,13 @@ S&=\textstyle\sum_i\begin{cases}\exp(-d_i/13)-1,&d_i<0,\\
 \end{align}
 Capped and raw targets have separate point/interval contracts; a capped interval
 does not imply raw-RUL coverage. The asymmetric NASA fleet total and mean are
-kept distinct. Fault families are evaluated at five severities and three seeded
-corruption realizations with the same frozen weights. Corruption replicates are
-not independent training seeds or fleet samples. Engine-balanced and prefix
-metrics are identified in saved records. Software tests establish implementation
-behavior, not field performance or superiority over the source papers.
+kept distinct. The format-10 repair evaluates one declared severity, 0.2, with
+three seeded corruption realizations per finite family and the same frozen
+weights; the preserved source additionally covers severities 0.1--0.5.
+Corruption replicates are not independent training seeds or fleet samples.
+Engine-balanced and prefix metrics are identified in saved records. Software
+tests establish implementation behavior, not field performance or superiority
+over the source papers.
 
 \section{\textbf{Results and Failure Analysis}}
 \label{sec:results}
@@ -353,7 +367,12 @@ guarantee every healthy future sensor or individual RUL prediction. In-support
 moves are bounded, whereas outliers may move inward across fitting support.
 A finite faulty in-support reading can still be under-repaired. Related-channel
 and temporally correlated simulation remains a hypothesis about acquisition
-errors, not measured aircraft fault prevalence.
+errors, not measured aircraft fault prevalence. Detector threshold recall remains
+low on drift, bias and noise, so the soft gate mitigates but does not remove
+under-repair. The non-increasing capped-RMSE guard rejected every positive
+long-horizon stretch, leaving the raw-target bias unresolved. The inspected
+FD004 engine 179 still receives a severely low prediction at cycle 240; aggregate
+improvements do not repair that individual failure.
 
 A single training seed cannot establish stability. The 125-cycle target limits
 long-horizon raw-RUL evidence. Wide intervals can cover inaccurate point estimates.

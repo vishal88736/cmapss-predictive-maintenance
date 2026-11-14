@@ -16,7 +16,7 @@ import torch
 from starlette.datastructures import UploadFile
 
 from grace_rul.artifacts import load_bundle
-from grace_rul.config import COLUMNS, FEATURE_COLUMNS, SUBSETS
+from grace_rul.config import COLUMNS, FEATURE_COLUMNS, POOLED_FORMAT_VERSION, SUBSETS
 from grace_rul.data import OperatingRegimeScaler, WindowDataset
 from grace_rul.model import GraceRUL
 from grace_rul.pooled import (load_pooled_training, pooled_config, prepare_pooled_run,
@@ -189,7 +189,7 @@ class SharedWorkflow(unittest.TestCase):
         cls.tmp.cleanup()
 
     def test_complete_shared_artifact_and_fitting_boundaries(self):
-        self.assertEqual(self.bundle["format_version"], 9)
+        self.assertEqual(self.bundle["format_version"], POOLED_FORMAT_VERSION)
         self.assertEqual(set(self.loaded), {"POOLED"})
         entry = self.loaded["POOLED"]["entry"]
         self.assertEqual(set(entry["scaler"]["fit_units"]), set(self.groups["fit"]))

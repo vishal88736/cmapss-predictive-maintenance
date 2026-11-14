@@ -9,7 +9,8 @@ normalizer, not a replacement for an unsupported calibration quantile.
 True RUL is used as a selection/calibration label, never to choose an inference
 bin.
 
-After freezing weights, support, thresholds, corrector and scales, evaluate all
+After freezing weights, support, thresholds, the zero-bound corrector state and
+scales, evaluate all
 observed prefixes of each of the \CurrentCalibrationEngines{} reserved engines.
 For capped $y^{(c)}=\min(r,125)$ and raw $y^{(r)}=r$, form
 \begin{equation}

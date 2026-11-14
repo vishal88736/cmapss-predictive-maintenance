@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 from sklearn.metrics import average_precision_score
 from sklearn.model_selection import KFold
 from .data import FAULTS, OperatingRegimeScaler, WindowDataset
-from .model import GraceRUL, TemporalCritic
+from .model import GraceRUL, TemporalCritic, age_from_cycles
 from .normalization import transform_spec
 from .checkpoints import load_checkpoint, pipeline_identity, random_state, restore_random_state, save_checkpoint
 from .calibration import POLICIES, calibrate_endpoint_intervals, interval_bounds
@@ -255,6 +255,13 @@ def branch_objective(model, result, target):
     return sum(F.mse_loss(result[name] / scale, target / scale) for name in names) / len(names)
 
 
+def _forward_with_optional_age(model, x, valid, *, age=None, **options):
+    """Keep duck-typed evaluation stubs working when no age channel is used."""
+    if age is not None:
+        options["age"] = age
+    return model(x, valid, **options)
+
+
 def prefix_consistency_loss(model, batch, current_prediction=None):
     """Supervise changes between two real prefixes of the same fitting engine.
 
@@ -267,24 +274,36 @@ def prefix_consistency_loss(model, batch, current_prediction=None):
     """
     if model.config.get("prefix_consistency_loss_weight", 0.) <= 0:
         return next(model.parameters()).sum() * 0.
-    required = {"previous_reference", "previous_valid", "previous_target", "pair_valid"}
+    active = model.config.get("prefix_consistency_path", "clean") == "active"
+    required = {"previous_valid", "previous_target", "pair_valid"}
+    required.add("previous_x" if active else "previous_reference")
     if not required.issubset(batch):
         raise ValueError("Prefix consistency requires paired fitting-engine prefixes.")
     supported = batch["pair_valid"].bool()
     if not bool(supported.any()):
         return next(model.parameters()).sum() * 0.
+    current_age = age_from_cycles(batch.get("cycle"), model.config)
+    previous_age = age_from_cycles(batch.get("previous_cycle"), model.config)
     with evaluation_mode(model):
         for module in model.predictor.modules():
             if isinstance(module, torch.nn.RNNBase):
                 module.train()
+        if active:
+            current_input = batch["x"]
+            previous_input = batch["previous_x"]
+        else:
+            current_input = batch["reference"]
+            previous_input = batch["previous_reference"]
         if current_prediction is None:
-            inputs = torch.cat([batch["reference"], batch["previous_reference"]])
+            inputs = torch.cat([current_input, previous_input])
             validity = torch.cat([batch["valid"], batch["previous_valid"]])
-            predictions = model(inputs, validity, use_repair=False, use_correction=False)["base"]
+            ages = torch.cat([current_age, previous_age]) if current_age is not None else None
+            predictions = _forward_with_optional_age(model, inputs, validity, age=ages,
+                use_repair=active, use_correction=False)["base"]
             current_prediction, previous = predictions.chunk(2)
         else:
-            previous = model(batch["previous_reference"], batch["previous_valid"],
-                use_repair=False, use_correction=False)["base"]
+            previous = _forward_with_optional_age(model, previous_input, batch["previous_valid"],
+                age=previous_age, use_repair=active, use_correction=False)["base"]
     scale = model.config["target_scale"]
     change = (current_prediction[supported] - previous[supported]) / scale
     target_change = (batch["target"][supported] - batch["previous_target"][supported]) / scale
@@ -304,7 +323,8 @@ def prefix_consistency_loss(model, batch, current_prediction=None):
 
 
 def objectives(model, batch, critic=None, consistency=True):
-    result = model(batch["x"], batch["valid"], use_correction=False)
+    age = age_from_cycles(batch.get("cycle"), model.config)
+    result = _forward_with_optional_age(model, batch["x"], batch["valid"], age=age, use_correction=False)
     valid = batch["valid"].unsqueeze(-1)
     changed = batch["altered"] & valid
     intact = ~batch["altered"] & valid
@@ -329,6 +349,10 @@ def objectives(model, batch, critic=None, consistency=True):
     scale = model.config["target_scale"]
     rul = F.mse_loss(result["base"] / scale, batch["target"] / scale)
     branch = branch_objective(model, result, batch["target"])
+    if model.config.get("predictor_family") == "gated" and model.config.get("predictor_branch", "both") == "both":
+        branch_agreement = F.mse_loss(result["local_prediction"] / scale, result["global_prediction"] / scale)
+    else:
+        branch_agreement = result["base"].sum() * 0
     cons = clean_rul = bypass_rul = result["base"].sum() * 0
     clean_grad = (model.config.get("clean_rul_loss_weight", 0.) > 0 or
                   model.config.get("prefix_consistency_loss_weight", 0.) > 0) and any(p.requires_grad for p in model.predictor.parameters())
@@ -340,10 +364,13 @@ def objectives(model, batch, critic=None, consistency=True):
                 for module in model.predictor.modules():
                     if isinstance(module, torch.nn.RNNBase):
                         module.train()
-            teacher = model(batch["reference"], batch["valid"], use_repair=False, use_correction=False)["base"]
+            teacher = _forward_with_optional_age(model, batch["reference"], batch["valid"],
+                age=age, use_repair=False, use_correction=False)["base"]
         if clean_grad:
             clean_rul = F.mse_loss(teacher / scale, batch["target"] / scale)
-    prefix_consistency = (prefix_consistency_loss(model, batch, teacher) if clean_grad and
+    prefix_teacher = (result["base"] if model.config.get("prefix_consistency_path", "clean") == "active"
+                      else (teacher if clean_grad else None))
+    prefix_consistency = (prefix_consistency_loss(model, batch, prefix_teacher) if clean_grad and
         model.config.get("prefix_consistency_loss_weight", 0.) > 0 else result["base"].sum() * 0.)
     if consistency:
         available_fraction = result["mask"].sum((1, 2)) / (21 * batch["valid"].sum(1)).clamp_min(1)
@@ -353,15 +380,16 @@ def objectives(model, batch, critic=None, consistency=True):
             cons = F.mse_loss(result["base"][mild] / scale, teacher[mild].detach() / scale)
     if (model.config["train_repair"] and model.config.get("bypass_rul_loss_weight", 0.) > 0 and
             any(p.requires_grad for p in model.predictor.parameters())):
-        bypass = model(batch["x"], batch["valid"], use_repair=False, use_correction=False)
+        bypass = _forward_with_optional_age(model, batch["x"], batch["valid"], age=age,
+            use_repair=False, use_correction=False)
         bypass_rul = (F.mse_loss(bypass["base"] / scale, batch["target"] / scale) +
                       model.config["branch_loss_weight"] * branch_objective(model, bypass, batch["target"]))
     adv = result["base"].sum() * 0 if critic is None else -critic(result["repaired"], batch["reference"][..., :3], batch["valid"]).mean()
     terms = {"rul": rul, "reconstruction": rec, "generator_reconstruction": generator_rec,
              "identity": identity, "identity_tail": identity_tail, "imputation": imputation,
              "finite_recovery": finite_recovery, "prefix_consistency": prefix_consistency, "detection": detection, "trend": trend,
-             "adversarial": adv, "consistency": cons, "branch": branch, "clean_rul": clean_rul,
-             "bypass_rul": bypass_rul}
+             "adversarial": adv, "consistency": cons, "branch": branch, "branch_agreement": branch_agreement,
+             "clean_rul": clean_rul, "bypass_rul": bypass_rul}
     if not model.config["train_repair"]:
         for name in ["reconstruction", "generator_reconstruction", "identity", "identity_tail", "imputation", "finite_recovery", "detection", "trend", "adversarial"]:
             terms[name] = rul * 0
@@ -426,7 +454,8 @@ def evaluate(model, dataset, config, fault_thresholds=None, *, capture_recovery_
     representation, compression_scale = transform_spec(getattr(dataset, "fault_profile", None))
     for batch in loader(dataset, config):
         batch = move_batch(batch, next(model.parameters()).device)
-        result = model(batch["x"], batch["valid"], **forward_options)
+        age = age_from_cycles(batch.get("cycle"), config)
+        result = _forward_with_optional_age(model, batch["x"], batch["valid"], age=age, **forward_options)
         prediction.extend(result["prediction"].cpu().tolist()); target.extend(batch["target"].cpu().tolist())
         changed = batch["altered"] & batch["valid"].unsqueeze(-1)
         intact = ~batch["altered"] & batch["valid"].unsqueeze(-1)
@@ -654,8 +683,12 @@ def validate_training_config(config):
             value = config.get(key)
             if value is not None and (isinstance(value, bool) or not np.isfinite(value) or value < 0):
                 raise ValueError(f"{key} must be None or finite and nonnegative.")
-    if config.get("finite_repair_gate", "continuous") not in {"continuous", "validated_threshold"}:
+    if config.get("finite_repair_gate", "continuous") not in {"continuous", "validated_threshold", "soft"}:
         raise ValueError("Unknown finite_repair_gate.")
+    if config.get("finite_repair_gate") == "soft":
+        if (not np.isfinite(config.get("soft_gate_temperature", 1.)) or config["soft_gate_temperature"] <= 0 or
+                not np.isfinite(config.get("soft_gate_power", 1.)) or config["soft_gate_power"] <= 0):
+            raise ValueError("Soft gate temperature and power must be finite and positive.")
     if config.get("detector_training", "joint") not in {"joint", "separate"}:
         raise ValueError("detector_training must be joint or separate.")
     if config.get("detector_validation_seed_policy", "training") not in {"training", "configured"}:
@@ -915,15 +948,18 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
                 if config.get("maximum_batches") and step >= config["maximum_batches"]:
                     break
                 batch = move_batch(batch, device)
+                age = age_from_cycles(batch.get("cycle"), config)
                 if adversarial:
                     progress.emit(f"{label}: batch {step + 1}/{total_batches}, critic gradient penalty")
                     with torch.no_grad():
-                        initial = model(batch["x"], batch["valid"], use_correction=False)
+                        initial = _forward_with_optional_age(model, batch["x"], batch["valid"],
+                            age=age, use_correction=False)
                     for _ in range(config["critic_steps"]):
                         critic_update(critic, critic_optimizer, initial, batch, config)
                 optimizer.zero_grad(set_to_none=True)
                 if stage == "predictor":
-                    result = model(batch["reference"], batch["valid"], use_repair=False, use_correction=False)
+                    result = _forward_with_optional_age(model, batch["reference"], batch["valid"],
+                        age=age, use_repair=False, use_correction=False)
                     scale = config["target_scale"]
                     loss = config["rul_loss_weight"] * F.mse_loss(result["base"] / scale, batch["target"] / scale) + config["branch_loss_weight"] * branch_objective(model, result, batch["target"])
                     if config.get("prefix_consistency_loss_weight", 0.) > 0:
@@ -1086,7 +1122,7 @@ def fit_pipeline(train_frame, validation_frame, subset, config, seed, verbose=Tr
 
 def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, checkpoint_dir=None):
     """Upstream temporary models never fit or select on their OOF engines."""
-    if not config.get("train_corrector", True):
+    if not config.get("train_corrector", True) or not config.get("use_corrector", True):
         model.eval()
         for p in model.parameters():
             p.requires_grad_(False)
@@ -1122,7 +1158,8 @@ def fit_corrector(model, fit_frame, validation_frame, subset, config, seed, *, c
                                         mode="correction", seed=seed + fold, family=family)
                 for batch in loader(dataset, config):
                     batch = move_batch(batch, device_for(config))
-                    out = fold_model(batch["x"], batch["valid"], use_correction=False)
+                    out = _forward_with_optional_age(fold_model, batch["x"], batch["valid"],
+                        age=age_from_cycles(batch.get("cycle"), config), use_correction=False)
                     features.append(out["correction_features"].cpu()); bases.append(out["base"].cpu()); targets.append(batch["target"].cpu())
         audit.append({"fold": fold, "fit_units": fold_scaler.state["fit_units"], "inner_validation_units": [int(i) for i in inner_val], "held_out_units": [int(i) for i in held]})
         print(f"{subset}: out-of-fold correction features {fold + 1}/{config['oof_folds']}", flush=True)

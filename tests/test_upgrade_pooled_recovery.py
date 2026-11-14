@@ -11,8 +11,7 @@ import pandas as pd
 import torch
 
 from grace_rul.artifacts import load_bundle
-from grace_rul.config import (FEATURE_COLUMNS, POOLED_ARCHITECTURE,
-                             POOLED_FORMAT_VERSION)
+from grace_rul.config import FEATURE_COLUMNS
 from grace_rul.model import GraceRUL
 from grace_rul.pooled import MODEL_KEY
 from scripts.upgrade_pooled_recovery import PooledUpgradeRejected, upgrade_pooled_run

@@ -27,8 +27,7 @@ import torch
 
 from grace_rul.artifacts import load_bundle
 from grace_rul.checkpoints import save_checkpoint
-from grace_rul.config import (CORRUPTION_PROTOCOL, FEATURE_COLUMNS, POOLED_ARCHITECTURE,
-                             POOLED_FORMAT_VERSION, SUBSETS)
+from grace_rul.config import CORRUPTION_PROTOCOL, FEATURE_COLUMNS, SUBSETS
 from grace_rul.data import OperatingRegimeScaler, WindowDataset, load_subset
 from grace_rul.model import GraceRUL
 from grace_rul.detection import audit_deployed_thresholds, select_deployment_thresholds
@@ -213,8 +212,8 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
     validate_pooled_entry(upgraded_entry, config)
 
     upgraded_bundle = {
-        "format_version": POOLED_FORMAT_VERSION,
-        "architecture": POOLED_ARCHITECTURE,
+        "format_version": bundle["format_version"],
+        "architecture": bundle["architecture"],
         "training_scope": "pooled",
         "requires_subset_label": False,
         "feature_columns": FEATURE_COLUMNS,
@@ -234,8 +233,8 @@ def upgrade_pooled_run(project_root, source_run_dir, output_dir=None, *,
     print(f"Exported verified upgraded bundle to {bundle_out_path} (sha256: {frozen_hash})", flush=True)
 
     manifest = {
-        "format_version": POOLED_FORMAT_VERSION,
-        "architecture": POOLED_ARCHITECTURE,
+        "format_version": bundle["format_version"],
+        "architecture": bundle["architecture"],
         "training_scope": "pooled",
         "requires_subset_label": False,
         "quick_run": False,

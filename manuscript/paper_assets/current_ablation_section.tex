@@ -5,23 +5,23 @@
 \label{tab:ablation}
 \centering\footnotesize
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{lrrrrrr}
+\begin{tabular}{lrrrrr}
 \toprule
-Condition & Full & $-$Recovery & $-$Corrector & Neither & Cov. (\%) & Width \\
+Condition & Full & $-$Recovery & Neither & Cov. (\%) & Width \\
 \midrule
-clean & 12.01 & 12.00 & 11.99 & 11.98 & 99.3 & 68.2 \\
-intermittent & 12.04 & 12.09 & 12.02 & 12.07 & 99.2 & 68.1 \\
-outage & 12.46 & 12.81 & 12.43 & 12.81 & 99.1 & 67.8 \\
-block & 12.19 & 12.49 & 12.16 & 12.48 & 99.2 & 68.1 \\
-noise & 12.33 & 12.33 & 12.31 & 12.31 & 99.2 & 68.3 \\
-bias & 12.09 & 12.14 & 12.07 & 12.13 & 99.2 & 68.3 \\
-drift & 12.10 & 12.12 & 12.08 & 12.10 & 99.2 & 68.3 \\
-stuck & 15.08 & 20.07 & 15.06 & 20.04 & 96.8 & 68.5 \\
-mixed & 13.05 & 14.44 & 13.03 & 14.42 & 98.7 & 68.2 \\
+clean & 11.08 & 10.95 & 10.95 & 98.4 & 60.3 \\
+intermittent & 11.08 & 11.12 & 11.12 & 98.5 & 60.1 \\
+outage & 11.32 & 12.58 & 12.58 & 98.4 & 59.7 \\
+block & 11.07 & 11.56 & 11.56 & 98.6 & 60.1 \\
+noise & 11.36 & 11.49 & 11.49 & 98.4 & 60.4 \\
+bias & 11.24 & 11.38 & 11.38 & 98.5 & 60.3 \\
+drift & 11.14 & 11.23 & 11.23 & 98.7 & 60.3 \\
+stuck & 12.11 & 22.58 & 22.58 & 97.6 & 60.2 \\
+mixed & 11.41 & 14.58 & 14.58 & 98.5 & 60.1 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize All four columns use the same weights, scaler, detector thresholds and interval radius; only the inference switches differ. Fault rows average three corruption replicates, clean has none. Nothing was selected, removed or retuned from these values, and the deployed artifact is unchanged. Coverage and mean width are for the full path under the frozen radius. Official benchmarks were inspected in earlier development, so this is a diagnostic, not a holdout.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize All columns use the same weights, scaler, detector thresholds and interval radius; only the inference switches differ. Fault rows average three corruption replicates, clean has none. Nothing was selected, removed or retuned from these values, and the deployed artifact is unchanged. The corrector is disabled in format 10, so a separate $-$Corrector column would be identical to Full. Coverage and mean width are for the full path under the frozen radius. Official benchmarks were inspected in earlier development, so this is a diagnostic, not a holdout.\end{minipage}
 \end{table*}
 }
 
@@ -33,17 +33,21 @@ effect, and only under persistent faults: stuck-fault RMSE falls from
 (\CurrentAblationStuckGain{}) at severity 0.2, the gain stays between
 \CurrentAblationStuckGainHigh{} and \CurrentAblationStuckGainLow{} across
 severities 0.1--0.5, and mixed faults improve by
-\CurrentAblationMixedGain{}. Outage and block faults gain about 0.3 cycles.
-Broadband noise gains nothing measurable, which is expected because recovery
-targets finite abnormal readings rather than additive measurement error.
-
-The bounded observable corrector does not earn its place on accuracy: removing it
-changes RMSE by at most \CurrentAblationCorrectorDelta{} cycles in any tested
-condition, and never for the worse. On clean endpoints the full path gives
+\CurrentAblationMixedGain{}. Outage and block faults gain
+\CurrentAblationOutageGain{} and \CurrentAblationBlockGain{} cycles,
+respectively. Broadband noise gains only \CurrentAblationNoiseGain{} cycles,
+consistent with recovery targeting persistent abnormal readings rather than
+additive measurement error. On clean endpoints the full path gives
 \CurrentAblationCleanFull{} against \CurrentAblationCleanPlain{} for the
-branch-fusion predictor with neither intervention. The corrector is retained
-because it belongs to the frozen artifact whose validation guards passed, not
-because it lowers RUL error, and the manuscript does not claim otherwise.
+branch-fusion predictor with neither intervention, so the recovery path is not
+free when no fault is present.
+
+The bounded observable corrector is disabled in format 10: its exported bound is
+zero, so removing it changes RMSE by \CurrentAblationCorrectorDelta{} cycles by
+construction. The source artifact's earlier null ablation, where removal changed
+RMSE by at most 0.02 cycles and never for the worse, motivated this choice. No
+corrector adjustment is present in the reported RUL, and the manuscript makes no
+claim that the corrector improves accuracy.
 
 The same table pairs coverage with sharpness. The mean clean official interval is
 \CurrentAblationWidth{} cycles wide against a 125-cycle target, so

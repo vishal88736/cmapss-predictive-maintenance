@@ -57,8 +57,9 @@ PAPER_A = {"FD001": 13.1, "FD002": 16.8, "FD003": 14.5, "FD004": 18.9}
 PAPER_A_NOTE = "Hybrid CNN-GRU, mean of five repeats (MSSP 2026)"
 TRANSD3 = {"FD001": 1.66, "FD002": 13.23, "FD003": 6.61, "FD004": 12.26}
 PAPER_B_POOLED = 12.15
-# Independently recomputed positions; a transcription error trips this.
-EXPECTED_RANK = {"FD001": 6, "FD002": 1, "FD003": 3, "FD004": 1}
+# Independently recomputed positions; a transcription error trips this. Format 10
+# moved FD001 and FD003 above the best third-party entry, so every position is 1.
+EXPECTED_RANK = {"FD001": 1, "FD002": 1, "FD003": 1, "FD004": 1}
 
 
 def sha(path):
@@ -82,6 +83,7 @@ def main(argv=None):
     parser.add_argument("--noise-run", type=Path,
                         default=ROOT / "artifacts/noise_benchmark_full")
     args = parser.parse_args(argv)
+    args.noise_run = args.noise_run.resolve()
 
     pointer = json.loads((OUT / "current_run.json").read_text())
     run = (PAPER / pointer["run"]).resolve()
@@ -167,7 +169,8 @@ def main(argv=None):
         r"Reported columns are transcribed from the cited papers and are not recomputed here. "
         r"Rank counts only third-party baselines, so a proposed row cannot define its own benchmark. "
         r"The penultimate row names every reported value still ahead of this work, including the "
-        r"TRANS-D3 proposed row where it applies; on FD004 this work is second overall, not first. "
+        r"TRANS-D3 proposed row where it applies; TRANS-D3 remains ahead on FD001 and FD003, so the "
+        r"table does not establish first place overall. "
         r"This work is one shared model without a subset label, whereas the compared entries are "
         r"subset-specific. Official C-MAPSS tests were inspected in earlier development, so all "
         r"values are exploratory rather than a pristine holdout.")
@@ -195,6 +198,21 @@ def main(argv=None):
         + "\n".join(rf"\newcommand{{\{name}}}{{{value}}}" for name, value in macros.items()) + "\n")
 
     rise = 100 * (float(noise_row('official', .2, 0.).RMSE) / float(noise_row('official', 0., 0.).RMSE) - 1)
+    gains = {subset: PAPER_A[subset] - ours[subset] for subset in SUBSETS}
+    min_gain, max_gain = min(gains.values()), max(gains.values())
+    ahead = [subset for subset in SUBSETS if TRANSD3[subset] < ours[subset]]
+    if all(rank[subset] == 1 for subset in SUBSETS):
+        rank_sentence = (r"Among the third-party baselines transcribed in Table~\ref{tab:literature}, "
+                         r"this work has the lowest RMSE on every subset. Its FD002 and FD004 values "
+                         r"are also first among every reported row. TRANS-D3's proposed FD001 and "
+                         r"FD003 values remain lower, so no first place overall is claimed.")
+    else:
+        rank_sentence = (r"Against the third-party baselines transcribed in Table~\ref{tab:literature}, "
+                         rf"this work ranks {rank['FD001']} on FD001, {rank['FD002']} on FD002, "
+                         rf"{rank['FD003']} on FD003 and {rank['FD004']} on FD004. "
+                         + (r"TRANS-D3's proposed values remain ahead on "
+                            + ", ".join(ahead) + r", so no first place overall is claimed." if ahead else
+                            r"No transcribed proposed value is ahead of this work."))
     section = rf"""\subsection{{\textbf{{Broadband Sensor Noise and Channel Dropout}}}}
 {noise_table}
 \CurrentNoiseTable
@@ -223,11 +241,8 @@ artifact, not a claim that any level matches a measured sensor specification.
 {literature_table}
 \CurrentLiteratureTable
 Table~\ref{{tab:literature}} transcribes the reported values of the supplied
-studies. This work is first on FD002 among every reported row, second on FD004
-behind the reported TRANS-D3 value of 12.26, third on FD003 among third-party
-baselines, and \CurrentRankFdA{{}}th on FD001. It is not first on FD004 and no
-such claim is made. The hybrid CNN--GRU study reports
-13.1, 16.8, 14.5 and 18.9, so this model improves every subset by 1.17 to 6.33
+studies. {rank_sentence} The hybrid CNN--GRU study reports
+13.1, 16.8, 14.5 and 18.9, so this model improves every subset by {min_gain:.2f} to {max_gain:.2f}
 cycles at a comparable 125-cycle target.
 
 Two qualifications matter more than the ordering. First, the compared entries are
@@ -262,8 +277,9 @@ not decomposable by subset and is therefore not entered as a per-subset cell.
     figure_block = (r"\begin{figure*}[tp]\centering"
                     "\n" r"\includegraphics[width=0.86\textwidth]{paper_assets/current_noise_curves.pdf}"
                     "\n" r"\caption{Capped RMSE of the frozen artifact against broadband sensor noise. "
-                    r"Every point is one evaluation of the same weights, scaler, corrector and interval "
-                    r"radius; levels are paired draws, not independent realizations or training seeds.}"
+                    r"Every point is one evaluation of the same weights, scaler and interval "
+                    r"radius, with the bounded corrector disabled; levels are paired draws, not "
+                    r"independent realizations or training seeds.}"
                     "\n" r"\label{fig:noise_curves}\end{figure*}" "\n")
     (OUT / "current_noise_figure.tex").write_text(figure_block)
 

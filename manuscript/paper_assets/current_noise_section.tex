@@ -9,14 +9,14 @@
 \toprule
 Noise & Official RMSE & Official MAE & Cov. (\%) & Internal RMSE & Cov. (\%) \\
 \midrule
-none & 12.01 & 8.52 & 99.3 & 13.30 & 99.0 \\
-5\% & 12.05 & 8.60 & 99.3 & 13.37 & 99.0 \\
-10\% & 12.17 & 8.62 & 99.2 & 13.55 & 99.2 \\
-20\% & 12.37 & 8.76 & 98.9 & 13.84 & 98.8 \\
-30\% & 12.67 & 9.04 & 99.0 & 14.29 & 98.8 \\
-50\% & 13.68 & 9.97 & 99.2 & 15.44 & 97.9 \\
-2\% cells & 11.96 & 8.56 & 99.6 & 13.37 & 99.0 \\
-5\% cells & 12.23 & 8.77 & 99.2 & 13.54 & 99.0 \\
+none & 11.08 & 7.19 & 98.4 & 12.07 & 99.0 \\
+5\% & 11.17 & 7.24 & 98.7 & 12.31 & 98.8 \\
+10\% & 11.00 & 7.21 & 99.0 & 12.14 & 98.3 \\
+20\% & 11.38 & 7.59 & 98.6 & 12.47 & 98.6 \\
+30\% & 11.98 & 8.12 & 98.3 & 13.03 & 98.6 \\
+50\% & 13.64 & 9.52 & 97.0 & 14.36 & 97.1 \\
+2\% cells & 10.94 & 6.98 & 98.7 & 12.00 & 99.0 \\
+5\% cells & 11.10 & 7.18 & 98.9 & 11.96 & 98.8 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
@@ -37,7 +37,7 @@ rather than resampled.
 
 Table~\ref{tab:noise} shows graceful degradation. At 20\% of the within-regime
 scale, pooled official RMSE moves from \CurrentNoiseOfficialZero{} to
-\CurrentNoiseOfficialTwenty{} cycles, an increase of 3.0\%, and empirical coverage
+\CurrentNoiseOfficialTwenty{} cycles, an increase of 2.8\%, and empirical coverage
 remains \CurrentNoiseCoverageTwenty{}\%. At 50\% it is
 \CurrentNoiseOfficialFifty{} cycles with \CurrentNoiseCoverageFifty{}\% coverage.
 The internal partition follows the same pattern, from \CurrentNoiseHeldoutZero{}
@@ -57,26 +57,23 @@ artifact, not a claim that any level matches a measured sensor specification.
 \toprule
 Model & FD001 & FD002 & FD003 & FD004 \\
 \midrule
-GRACE-RUL (one shared model, no subset label) & \textbf{11.93} & \textbf{11.77} & \textbf{11.25} & \textbf{12.57} \\
+GRACE-RUL (one shared model, no subset label) & \textbf{10.13} & \textbf{11.94} & \textbf{9.80} & \textbf{10.99} \\
 Hybrid CNN--GRU (reported, five repeats) & 13.1 & 16.8 & 14.5 & 18.9 \\
 TRANS-D3 (reported) & 1.66 & 13.23 & 6.61 & 12.26 \\
 Best third-party baseline (reported) & 10.61 (STAR) & 13.47 (STAR) & 10.71 (STAR) & 15.86 (DLformer) \\
-Reported value ahead of GRACE-RUL & TRANS-D3 1.66 & none & TRANS-D3 6.61 & TRANS-D3 12.26 \\
-Position among third-party baselines (proposed row excluded) & 6 & 1 & 3 & 1 \\
+Reported value ahead of GRACE-RUL & TRANS-D3 1.66 & none & TRANS-D3 6.61 & none \\
+Position among third-party baselines (proposed row excluded) & 1 & 1 & 1 & 1 \\
 \bottomrule
 \end{tabular}
 \par\vspace{2pt}
-\begin{minipage}{\textwidth}\scriptsize Reported columns are transcribed from the cited papers and are not recomputed here. Rank counts only third-party baselines, so a proposed row cannot define its own benchmark. The penultimate row names every reported value still ahead of this work, including the TRANS-D3 proposed row where it applies; on FD004 this work is second overall, not first. This work is one shared model without a subset label, whereas the compared entries are subset-specific. Official C-MAPSS tests were inspected in earlier development, so all values are exploratory rather than a pristine holdout.\end{minipage}
+\begin{minipage}{\textwidth}\scriptsize Reported columns are transcribed from the cited papers and are not recomputed here. Rank counts only third-party baselines, so a proposed row cannot define its own benchmark. The penultimate row names every reported value still ahead of this work, including the TRANS-D3 proposed row where it applies; TRANS-D3 remains ahead on FD001 and FD003, so the table does not establish first place overall. This work is one shared model without a subset label, whereas the compared entries are subset-specific. Official C-MAPSS tests were inspected in earlier development, so all values are exploratory rather than a pristine holdout.\end{minipage}
 \end{table*}
 }
 
 \CurrentLiteratureTable
 Table~\ref{tab:literature} transcribes the reported values of the supplied
-studies. This work is first on FD002 among every reported row, second on FD004
-behind the reported TRANS-D3 value of 12.26, third on FD003 among third-party
-baselines, and \CurrentRankFdA{}th on FD001. It is not first on FD004 and no
-such claim is made. The hybrid CNN--GRU study reports
-13.1, 16.8, 14.5 and 18.9, so this model improves every subset by 1.17 to 6.33
+studies. Among the third-party baselines transcribed in Table~\ref{tab:literature}, this work has the lowest RMSE on every subset. Its FD002 and FD004 values are also first among every reported row. TRANS-D3's proposed FD001 and FD003 values remain lower, so no first place overall is claimed. The hybrid CNN--GRU study reports
+13.1, 16.8, 14.5 and 18.9, so this model improves every subset by 2.97 to 7.91
 cycles at a comparable 125-cycle target.
 
 Two qualifications matter more than the ordering. First, the compared entries are

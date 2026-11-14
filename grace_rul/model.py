@@ -34,6 +34,43 @@ def last_valid(x, valid):
     return x[torch.arange(len(x), device=x.device), index]
 
 
+def age_from_cycles(cycles, config):
+    """Normalised engine age for the format-10 predictor input.
+
+    The predictor otherwise sees only a 70-cycle window, so a healthy plateau
+    window at cycle 80 and one at cycle 300 are indistinguishable. The age
+    channel is derived from the observed cycle index, never from the target.
+    """
+    if not config.get("age_feature", False) or cycles is None:
+        return None
+    normalizer = max(float(config.get("age_normalizer", 500.)), 1.)
+    return (cycles.float() / normalizer).clamp(0., 1.)
+
+
+def expand_predictor_for_age(state_dict, config):
+    """Widen the first predictor layers by one zero-initialised age channel.
+
+    Starting from zeros makes the expanded model exactly reproduce the frozen
+    format-9 predictions before fine-tuning, while allowing the age channel to
+    acquire weights during refinement.
+    """
+    if not config.get("age_feature", False):
+        return state_dict
+    expanded = {}
+    for key, value in state_dict.items():
+        if key in {"predictor.conv3.weight", "predictor.conv5.weight"} and value.ndim == 3 and value.shape[1] == 66:
+            wider = value.new_zeros((value.shape[0], 67, value.shape[2]))
+            wider[:, :66] = value
+            expanded[key] = wider
+        elif key == "predictor.input_projection.weight" and value.ndim == 2 and value.shape[1] == 66:
+            wider = value.new_zeros((value.shape[0], 67))
+            wider[:, :66] = value
+            expanded[key] = wider
+        else:
+            expanded[key] = value
+    return expanded
+
+
 def has_finite_fault_detector(model):
     """Expose updated detector scores independently of the repair-path choice.
 
@@ -80,10 +117,11 @@ class RULPredictor(nn.Module):
         super().__init__()
         self.config = config
         c, h, d = config["cnn_channels"], config["gru_hidden"], config["transformer_dim"]
-        self.conv3, self.conv5 = nn.Conv1d(66, c, 3, padding=1), nn.Conv1d(66, c, 5, padding=2)
+        channels = 66 + int(config.get("age_feature", False))
+        self.conv3, self.conv5 = nn.Conv1d(channels, c, 3, padding=1), nn.Conv1d(channels, c, 5, padding=2)
         self.gru = nn.GRU(2 * c, h, batch_first=True)
         self.local_projection = nn.Linear(h, d)
-        self.input_projection = nn.Linear(66, d)
+        self.input_projection = nn.Linear(channels, d)
         position = torch.arange(config["sequence_length"]).float()[:, None]
         frequency = torch.exp(torch.arange(0, d, 2).float() * (-math.log(10000.0) / d))
         encoding = torch.zeros(config["sequence_length"], d)
@@ -96,8 +134,13 @@ class RULPredictor(nn.Module):
         self.head = nn.Sequential(nn.Linear(d + 64, 64), nn.ReLU(), nn.Dropout(config["dropout"]), nn.Linear(64, 1))
         self.local_head, self.global_head = nn.Linear(d, 1), nn.Linear(d, 1)
 
-    def forward(self, repaired, settings, mask, weights, observed, valid, branch="both", equal_fusion=False):
+    def forward(self, repaired, settings, mask, weights, observed, valid, branch="both", equal_fusion=False, age=None):
         x = torch.cat([repaired, settings, mask, weights], -1) * valid.unsqueeze(-1)
+        if self.config.get("age_feature", False):
+            if age is None:
+                age = x.new_zeros((len(x),))
+            age = age.flatten().to(device=x.device, dtype=x.dtype)
+            x = torch.cat([x, age[:, None, None].expand(-1, x.shape[1], 1)], -1)
         local = global_features = x.new_zeros((len(x), self.config["transformer_dim"]))
         if branch != "global":
             n = min(self.config["local_length"], x.shape[1])
@@ -139,7 +182,7 @@ class GraceRUL(nn.Module):
         # New finite repairs are disabled until training-only validation selects
         # sensor thresholds. Missing observations still route to the generator.
         self.register_buffer("finite_repair_thresholds", torch.ones(21),
-            persistent=config.get("finite_repair_gate") == "validated_threshold")
+            persistent=config.get("finite_repair_gate") in {"validated_threshold", "soft"})
         supported = config.get("recovery_safety") == "fitted_support"
         self.register_buffer("recovery_centers", torch.zeros(6, 3), persistent=supported)
         self.register_buffer("recovery_lower", torch.zeros(6, 21), persistent=supported)
@@ -177,8 +220,9 @@ class GraceRUL(nn.Module):
         self.recovery_regime_count.fill_(count)
         self.recovery_support = dict(profile)
 
-    def forward(self, x, valid=None, use_repair=True, use_correction=True, branch=None, equal_fusion=None):
+    def forward(self, x, valid=None, use_repair=True, use_correction=True, branch=None, equal_fusion=None, age=None):
         use_repair = use_repair and self.config["train_repair"] and bool(self.repair_enabled)
+        use_correction = use_correction and self.config.get("use_corrector", True)
         branch = self.config.get("predictor_branch", "both") if branch is None else branch
         equal_fusion = self.config.get("equal_fusion", False) if equal_fusion is None else equal_fusion
         valid = torch.ones(x.shape[:2], dtype=torch.bool, device=x.device) if valid is None else valid.bool()
@@ -190,9 +234,23 @@ class GraceRUL(nn.Module):
         gate_scores = probabilities.detach() if self.config.get("detach_repair_gate", False) else probabilities
         generated = self.generator(observed, mask, gate_scores, settings, valid) if use_repair else observed
         finite_weights = gate_scores
-        if self.config.get("finite_repair_gate") == "validated_threshold":
+        gate_mode = self.config.get("finite_repair_gate", "continuous")
+        if gate_mode == "validated_threshold":
             threshold = self.finite_repair_thresholds
             finite_weights = gate_scores * ((gate_scores >= threshold) & (threshold < 1))
+        elif gate_mode == "continuous":
+            finite_weights = gate_scores
+        elif gate_mode == "soft":
+            # Calibrated probability weighting: a missed fault is partially
+            # repaired instead of being passed through untouched. The support
+            # envelope still bounds every finite move.
+            temperature = max(float(self.config.get("soft_gate_temperature", 1.)), 1e-3)
+            power = max(float(self.config.get("soft_gate_power", 1.)), 1e-3)
+            finite_weights = torch.sigmoid(logits / temperature).pow(power)
+            if self.config.get("soft_gate_respect_disabled", True):
+                finite_weights = finite_weights * (self.finite_repair_thresholds < 1).to(finite_weights.dtype)
+        else:
+            raise ValueError(f"Unknown finite repair gate: {gate_mode}")
         weights = ((1 - mask) + mask * finite_weights) * valid.unsqueeze(-1)
         repair_proposal = ((1 - weights) * observed + weights * generated) * valid.unsqueeze(-1) if use_repair else observed
         repaired = repair_proposal
@@ -208,11 +266,17 @@ class GraceRUL(nn.Module):
                 lower = upper = observed
             repaired = bounded_finite_repair(observed, repaired, mask.bool(), valid,
                 lower, upper, self.config)
-        result = self.predictor(repaired, settings, mask, weights if use_repair else torch.zeros_like(weights), observed, valid, branch, equal_fusion)
+        result = self.predictor(repaired, settings, mask, weights if use_repair else torch.zeros_like(weights),
+                                observed, valid, branch, equal_fusion, age)
         features = torch.cat([result["quality"], result["base"][:, None] / self.config["target_scale"],
             result["local_prediction"][:, None] / self.config["target_scale"], result["global_prediction"][:, None] / self.config["target_scale"]], -1)
         delta = self.correction_bound * self.corrector(features).tanh().flatten() if use_correction else torch.zeros_like(result["base"])
-        return {**result, "prediction": (result["base"] + delta).clamp_min(0), "delta": delta,
+        prediction = (result["base"] + delta).clamp_min(0)
+        plateau = self.config.get("plateau_calibration")
+        if isinstance(plateau, dict) and float(plateau.get("alpha", 0.)) > 0:
+            knee = float(plateau.get("knee", 100.))
+            prediction = prediction + float(plateau["alpha"]) * F.relu(prediction - knee)
+        return {**result, "prediction": prediction, "delta": delta,
                 "correction_features": features, "logits": logits, "fault_scores": probabilities,
                 "generated": generated, "repair_proposal": repair_proposal, "repaired": repaired, "mask": mask, "weights": weights, "observed": observed}
 
@@ -226,12 +290,13 @@ class SingleBranchPredictor(nn.Module):
         super().__init__()
         self.config, self.family = config, config["predictor_family"]
         c, h, d = config["cnn_channels"], config["gru_hidden"], config["transformer_dim"]
+        channels = 24 + int(config.get("age_feature", False))
         if self.family in {"cnn_gru", "cnn_lstm"}:
-            self.conv3, self.conv5 = nn.Conv1d(24, c, 3, padding=1), nn.Conv1d(24, c, 5, padding=2)
+            self.conv3, self.conv5 = nn.Conv1d(channels, c, 3, padding=1), nn.Conv1d(channels, c, 5, padding=2)
             self.gru = (nn.GRU if self.family == "cnn_gru" else nn.LSTM)(2 * c, h, batch_first=True)
             self.projection = nn.Linear(h, d)
         elif self.family == "transformer":
-            self.projection = nn.Linear(24, d)
+            self.projection = nn.Linear(channels, d)
             layer = nn.TransformerEncoderLayer(d, config["transformer_heads"], 2 * d,
                 config["dropout"], batch_first=True, activation="gelu")
             self.transformer = nn.TransformerEncoder(layer, config["transformer_layers"], enable_nested_tensor=False)
@@ -244,8 +309,13 @@ class SingleBranchPredictor(nn.Module):
             raise ValueError(f"Unknown predictor family: {self.family}")
         self.head = nn.Sequential(nn.Linear(d, 64), nn.ReLU(), nn.Dropout(config["dropout"]), nn.Linear(64, 1))
 
-    def forward(self, repaired, settings, mask, weights, observed, valid, branch="both", equal_fusion=False):
+    def forward(self, repaired, settings, mask, weights, observed, valid, branch="both", equal_fusion=False, age=None):
         x = torch.cat([repaired, settings], -1) * valid.unsqueeze(-1)
+        if self.config.get("age_feature", False):
+            if age is None:
+                age = x.new_zeros((len(x),))
+            age = age.flatten().to(device=x.device, dtype=x.dtype)
+            x = torch.cat([x, age[:, None, None].expand(-1, x.shape[1], 1)], -1)
         if self.family == "transformer":
             encoded = self.projection(x) + self.position[:, :x.shape[1]]
             sequence = self.transformer(encoded, src_key_padding_mask=~valid)
