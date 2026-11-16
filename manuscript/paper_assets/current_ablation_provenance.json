@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-11-14T09:05:01.108123+00:00",
+  "created_at_utc": "2026-11-16T04:57:22.002840+00:00",
   "scope": "Generated from saved ablation measurements; no training, inference or selection.",
   "run": "cmapss-predictive-maintenance/artifacts/pooled_v10_paper_20261114_repaired",
   "bundle_sha256": "9b2b86ef0236351e1d4d68b6a9ea8a5909515ad454060129e1259ad8293aa2a8",
@@ -20,7 +20,7 @@
   },
   "outputs": {
     "current_ablation_macros.tex": "310587aace505e23b4afadfe02a07b2f46b73dcc5dc7e0b7680cae3dd7544d94",
-    "current_ablation_section.tex": "adc9e0d771ceb8e3f84a9aa7088c0ca24235fd333accecdb0d0ba9acce448171"
+    "current_ablation_section.tex": "fda061fe4a5f1f0b01eaeb5f4126d028eae9625ae81662fca4c0daaa59e2eeca"
   },
   "post_freeze_diagnostic": true,
   "deployed_artifact_changed": false,

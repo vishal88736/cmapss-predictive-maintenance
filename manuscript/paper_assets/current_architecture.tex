@@ -1,4 +1,4 @@
-% Shared format-10 inference architecture; native IEEE figure.
+% Shared inference architecture; native IEEE figure.
 \begin{figure*}[!t]
 \centering
 \begin{tikzpicture}[y=.94cm,
@@ -30,7 +30,7 @@
 \draw[link] (features.south)--++(0,-.25)-| (global.north);
 \node[box,minimum height=1.75cm] (fusion) at (6.0,-6.0) {Quality-conditioned fusion\\$(g_\ell,g_g)=f(h_\ell,h_g,q)$\\Softmax mixing weights\\$h=g_\ell h_\ell+g_g h_g$};
 \node[box,minimum height=1.75cm] (heads) at (10.2,-6.0) {Base + auxiliary RUL heads\\Base $\hat y_0$; local/global estimates\\Quality $q$ and age retained};
-\node[box,minimum height=1.75cm] (corrector) at (14.5,-6.0) {Disabled bounded corrector\\Null component ablation\\$\Delta\equiv0$ in format 10};
+\node[box,minimum height=1.75cm] (corrector) at (14.5,-6.0) {Disabled bounded corrector\\Null component ablation\\$\Delta\equiv0$ in the deployed model};
 \draw[link] (local.south)--(fusion.north west);
 \draw[link] (global.south)--(fusion.north east);
 \draw[link] (quality.south)|-(fusion.west);
@@ -39,9 +39,9 @@
 
 \node[train] (tail) at (3.9,-8.4) {\textbf{Training only: tail loss}\\Upper-tail window/channel identity\\uses \emph{unbounded} $\widetilde R$ and intact labels.\\Mean identity uses bounded $R$.};
 \node[train] (critic) at (9.1,-8.4) {\textbf{Training only: WGAN-GP}\\Conditional CNN--LSTM critic\\receives bounded $R$ or reference sensors\\and settings $U$; updates generator.};
-\node[box,minimum height=1.75cm] (output) at (14.5,-8.4) {Final RUL $\max(0,\hat y_0)$\\plateau stretch inactive ($\alpha=0$)\\Separate capped/raw intervals};
+\node[box,minimum height=1.75cm] (output) at (14.5,-8.4) {Final RUL $\max(0,\hat y_0)$\\validation-selected plateau stretch\\Separate capped/raw intervals};
 \draw[link] (corrector)--(output);
 \end{tikzpicture}
-\caption{Shared format-10 computation for every source subset; a subset label is not an inference input. The directed bound acts in original, uncompressed regime-standardized sensor coordinates $z$, using fitting-only support. The 0.15 budget applies to observations inside that support; large outliers can move inward without a universal small-step cap. The finite-fault gate is probability-weighted, with $\tau_j=1$ as the only hard channel disable. The predictor receives an observed-cycle age channel. The detector and generator remain frozen during the reported predictor refinement. Dashed components describe source recovery training, and the WGAN critic is absent at deployment. Active-path paired-prefix and fitting-tail objectives refine the predictor without adding a hard inference floor or monotonic constraint. Altered-entry labels and targets never enter deployment.}
+\caption{Shared computation for every subset; a subset label is not an inference input. The directed bound acts in original, uncompressed regime-standardized sensor coordinates $z$, using fitting-only support. The 0.15 budget applies to observations inside that support; large outliers can move inward without a universal small-step cap. The finite-fault gate is probability-weighted, with $\tau_j=1$ as the only hard channel disable. The predictor receives an observed-cycle age channel. The detector and generator remain frozen during the reported predictor refinement. Dashed components describe recovery training, and the WGAN critic is absent at deployment. Active-path paired-prefix and fitting-tail objectives refine the predictor without adding a hard inference floor or monotonic constraint. Altered-entry labels and targets never enter deployment.}
 \label{fig:architecture}
 \end{figure*}

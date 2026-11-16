@@ -70,9 +70,9 @@ def main(argv=None):
         r"All columns use the same weights, scaler, detector thresholds and interval radius; only "
         r"the inference switches differ. Fault rows average three corruption replicates, clean has none. "
         r"Nothing was selected, removed or retuned from these values, and the deployed artifact is "
-        r"unchanged. The corrector is disabled in format 10, so a separate $-$Corrector column would be "
+        r"unchanged. The corrector is disabled in the deployed model, so a separate $-$Corrector column would be "
         r"identical to Full. Coverage and mean width are for the full path under the frozen radius. "
-        r"Official benchmarks were inspected in earlier development, so this is a diagnostic, not a holdout.")
+        r"Official benchmarks were inspected during development, so this is a diagnostic, not a holdout.")
 
     gains = {severity: value(f"stuck@{severity}", "bypass", "RMSE") - value(f"stuck@{severity}", "full", "RMSE")
              for severity in ("0.1", "0.2", "0.3", "0.5")}
@@ -127,9 +127,9 @@ additive measurement error. On clean endpoints the full path gives
 branch-fusion predictor with neither intervention, so the recovery path is not
 free when no fault is present.
 
-The bounded observable corrector is disabled in format 10: its exported bound is
+The bounded observable corrector is disabled in the deployed model: its exported bound is
 zero, so removing it changes RMSE by \CurrentAblationCorrectorDelta{{}} cycles by
-construction. The source artifact's earlier null ablation, where removal changed
+construction. A null ablation, where removal changed
 RMSE by at most 0.02 cycles and never for the worse, motivated this choice. No
 corrector adjustment is present in the reported RUL, and the manuscript makes no
 claim that the corrector improves accuracy.

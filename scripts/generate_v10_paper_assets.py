@@ -1,4 +1,4 @@
-"""Generate the format-10 manuscript assets from one frozen v10 repair run.
+"""Generate the manuscript assets from one frozen run.
 
 The generator reads only saved metrics, predictions, calibration metadata and
 audit JSON. It performs no fitting, inference or selection. All prose numbers
@@ -94,44 +94,34 @@ def engine_trace(pred, unit, trace):
     return selected
 
 
-def draw_figures(official, internal, baseline, preserved, predictions, report):
+def draw_figures(official, internal, predictions):
     subsets = ["FD001", "FD002", "FD003", "FD004", "POOLED"]
-    fig, ax = plt.subplots(1, 2, figsize=(7.12, 2.35))
-    fig.subplots_adjust(top=.76, bottom=.22, wspace=.30)
-    for axis, partition, title in [(ax[0], official, "Official clean endpoints"),
-                                   (ax[1], internal, "Internal clean prefixes")]:
-        old = baseline[baseline.partition.eq("official_benchmark" if partition is official else "internal_test_10pct")]
-        prior = preserved[preserved.partition.eq("official_benchmark" if partition is official else "internal_test_10pct")]
-        x = np.arange(len(subsets))
-        for data, offset, label, color in [(old, -.25, "Revision 2", "#91a1ad"),
-                                           (prior, 0., "Preserved v9 source", "#d5a16d"),
-                                           (partition, .25, "Format-10 repair", "#187e83")]:
-            values = [one(data, subset=s, family="clean", protocol="capped_125").RMSE for s in subsets]
-            axis.bar(x + offset, values, .24, label=label, color=color)
-        axis.set(xticks=x, xticklabels=subsets, ylabel="Capped RMSE (cycles)", title=title)
-    handles, labels = ax[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(.52, 1.02), ncol=3, frameon=False)
+    fig, ax = plt.subplots(figsize=(7.12, 2.35), constrained_layout=True)
+    x = np.arange(len(subsets))
+    for data, offset, label, color in [(official, -.18, "Official endpoints", "#187e83"),
+                                       (internal, .18, "Internal prefixes", "#d47a29")]:
+        values = [one(data, subset=s, family="clean", protocol="capped_125").RMSE for s in subsets]
+        ax.bar(x + offset, values, .34, label=label, color=color)
+    ax.set(xticks=x, xticklabels=subsets, ylabel="Capped RMSE (cycles)",
+           title="Clean capped RMSE by subset")
+    ax.legend(frameon=False, fontsize=6.5, ncol=2)
     save(fig, "pooled_clean")
 
-    fig, axes = plt.subplots(1, 3, figsize=(7.12, 2.35), constrained_layout=True)
-    for axis, subset in zip(axes, ["POOLED", "FD002", "FD004"]):
-        for family, color in [("stuck", "#2864a8"), ("mixed", "#d47a29")]:
-            prior = preserved[preserved.partition.eq("official_benchmark") & preserved.subset.eq(subset) &
-                              preserved.family.eq(family) & preserved.protocol.eq("capped_125")]
-            grouped = prior.groupby("severity").RMSE.agg(["mean", "std"])
-            if len(grouped):
-                x = grouped.index.to_numpy(float); y = grouped["mean"].to_numpy(float)
-                sd = grouped["std"].fillna(0).to_numpy(float)
-                axis.plot(x, y, "o-", ms=2.5, lw=1.2, color=color, label=f"{family} (v9 source)")
-                axis.fill_between(x, y - sd, y + sd, color=color, alpha=.12, lw=0)
-            new = official[official.subset.eq(subset) & official.family.eq(family) &
-                           official.severity.eq(.2) & official.protocol.eq("capped_125")]
-            if len(new):
-                axis.scatter([.2], [new.RMSE.mean()], marker="*", s=55, color=color,
-                             edgecolor="white", linewidth=.4, zorder=5,
-                             label=f"{family} (format 10)")
-        axis.set(title=subset, xlabel="Fault severity", ylabel="Capped RMSE (cycles)", xticks=[.1, .2, .3, .4, .5])
-    axes[0].legend(frameon=False, fontsize=5.4, ncol=2)
+    families = ["stuck", "mixed"]
+    fig, ax = plt.subplots(figsize=(7.12, 2.35), constrained_layout=True)
+    x = np.arange(len(families))
+    for subset, offset, color in [("POOLED", -.18, "#187e83"),
+                                  ("FD002", 0., "#d47a29"),
+                                  ("FD004", .18, "#6b5aa6")]:
+        values = []
+        for family in families:
+            rows = official[official.subset.eq(subset) & official.family.eq(family) &
+                            official.severity.eq(.2) & official.protocol.eq("capped_125")]
+            values.append(rows.RMSE.mean())
+        ax.bar(x + offset, values, .26, label=subset, color=color)
+    ax.set(xticks=x, xticklabels=families, ylabel="Capped RMSE (cycles)",
+           title="Official structured faults at severity 0.2")
+    ax.legend(frameon=False, fontsize=6.5, ncol=3)
     save(fig, "pooled_faults")
 
     fig, axes = plt.subplots(1, 2, figsize=(7.12, 2.35))
@@ -188,7 +178,7 @@ def draw_figures(official, internal, baseline, preserved, predictions, report):
             axes[0].annotate(f"Cycle 240: {row.prediction:.2f} / target {row.target:g}",
                              (row.cycle, row.prediction), xytext=(105, 25), textcoords="data",
                              arrowprops={"arrowstyle": "->", "color": "#444444"}, fontsize=6.5)
-        axes[0].set(title="FD004 engine 179 under the format-10 repair",
+        axes[0].set(title="FD004 engine 179: frozen-model trajectory",
                     ylabel="Capped RUL (cycles)")
         handles, legend_labels = axes[0].get_legend_handles_labels()
         fig.legend(handles, legend_labels, loc="upper center", bbox_to_anchor=(.52, 1.02),
@@ -206,10 +196,6 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument("--paper-root", type=Path, default=PROJECT.parent)
-    parser.add_argument("--baseline-run", type=Path,
-                        default=PROJECT / "artifacts/pooled_v9_r2_20261029_114845")
-    parser.add_argument("--source-run", type=Path,
-                        default=PROJECT / "artifacts/pooled_repair_20261101T230338Z_9ea6_dpk/final_model_verified")
     parser.add_argument("--recovery-run", type=Path, default=None,
                         help="Optional post-freeze recovery benchmark supplying official fault coverage.")
     args = parser.parse_args(argv)
@@ -229,10 +215,6 @@ def main(argv=None):
         recovery_coverage = {row.family: float(row.interval_coverage) for row in measured.itertuples()}
     official = csv(RUN / "official_benchmark_metrics.csv")
     internal = csv(RUN / "internal_test_10pct_metrics.csv")
-    baseline = pd.concat([csv(args.baseline_run / f"{p}_metrics.csv")
-                          for p in ["official_benchmark", "internal_test_10pct"]], ignore_index=True)
-    preserved = pd.concat([csv(args.source_run / f"{p}_metrics.csv")
-                           for p in ["official_benchmark", "internal_test_10pct"]], ignore_index=True)
     predictions = {p: csv(RUN / f"predictions/{p}_clean_s0_r0.csv.gz")
                    for p in ["official_benchmark", "internal_test_10pct"]}
 
@@ -241,9 +223,6 @@ def main(argv=None):
     c = one(official, subset="POOLED", family="clean", protocol="capped_125")
     c_raw = one(official, subset="POOLED", family="clean", protocol="official_uncapped")
     h = one(internal, subset="POOLED", family="clean", protocol="capped_125")
-    old = one(baseline, partition="official_benchmark", subset="POOLED", family="clean", protocol="capped_125")
-    prior = one(preserved, partition="official_benchmark", subset="POOLED", family="clean", protocol="capped_125")
-    prior_internal = one(preserved, partition="internal_test_10pct", subset="POOLED", family="clean", protocol="capped_125")
     subsets = ["FD001", "FD002", "FD003", "FD004", "POOLED"]
     parts = summary["partition_counts"]
     counts = summary["parameter_counts"]
@@ -307,7 +286,7 @@ def main(argv=None):
 
     dataset_rows = summary["dataset_counts"]
     official_counts = {s: int(one(official, subset=s, family="clean", protocol="capped_125").engines) for s in subsets}
-    tables = [table("CurrentPartitionTable", "Format-10 pooled engine-disjoint data partitions.",
+    tables = [table("CurrentPartitionTable", "Pooled engine-disjoint data partitions.",
         "tab:pooled_partitions", "lrrrrrr",
         r"Subset & Available training & Fit & Selection & Calibration & Internal test & Official test",
         [[r["subset"], r["train"], r["fit"], r["validation"], r["calibration"], r["test"], official_counts[r["subset"]]]
@@ -325,22 +304,9 @@ def main(argv=None):
                      f"{100 * x.Interval_Coverage:.1f}", f"{faults['stuck']:.2f}",
                      f"{faults['mixed']:.2f}", f"{y.RMSE:.2f}"])
     tables.append(table("CurrentPooledResultsTable",
-        "Format-10 model: capped-target clean and structured-fault results.", "tab:current_pooled",
+        "GRACE-RUL model: capped-target clean and structured-fault results.", "tab:current_pooled",
         "lrrrrrrrr", r"Subset & $N_{\rm off}$ & RMSE & MAE & NASA $S$ & Cov. (\%) & Stuck & Mixed & Internal RMSE",
-        rows, r"Fault columns average three corruption replicates at severity 0.2; these are not training-seed replications. Coverage is empirical clean prefix/endpoint coverage. Internal RMSE uses all saved prefixes from each source's reserved engines. Targets are $\min(r,125)$; units are cycles except NASA score and coverage."))
-
-    comparison = []
-    for label, values in [("Original revision 2", baseline), ("Preserved v9 source", preserved),
-                          ("Format-10 repair", pd.concat([official, internal], ignore_index=True))]:
-        x = one(values, partition="official_benchmark", subset="POOLED", family="clean", protocol="capped_125")
-        y = one(values, partition="internal_test_10pct", subset="POOLED", family="clean", protocol="capped_125")
-        faults = values[values.partition.eq("official_benchmark") & values.subset.eq("POOLED") &
-                        values.family.eq("stuck") & values.protocol.eq("capped_125")]
-        stuck02 = faults[faults.severity.eq(.2)].RMSE.mean()
-        comparison.append([label, f"{x.RMSE:.3f}", f"{y.RMSE:.3f}", f"{stuck02:.3f}"])
-    tables.append(table("CurrentComparisonTable", "Pooled comparison with the preserved v9 source.",
-        "tab:current_comparison", "lrrr", r"Artifact & Official clean RMSE & Internal clean RMSE & Stuck @0.2",
-        comparison, r"All rows use their own saved predictions and capped targets. The stuck column uses the common severity-0.2 setting over three corruption realizations; higher-severity v9 values are not mixed in because the format-10 official evaluation was run at severity 0.2 only. The held selection recovery audit still covers all declared severities. v9 test values are reused descriptive evidence and did not select the format-10 candidate."))
+        rows, r"Fault columns average three corruption replicates at severity 0.2; these are not training-seed replications. Coverage is empirical clean prefix/endpoint coverage. Internal RMSE uses all saved prefixes from each subset's reserved engines. Targets are $\min(r,125)$; units are cycles except NASA score and coverage."))
 
     rawrows = []
     for s in ["POOLED", *subsets[:-1]]:
@@ -359,7 +325,7 @@ def main(argv=None):
                         f"{b['radius']:.2f}" if b["radius"] is not None else r"$\infty$",
                         f"{r['radius']:.2f}" if r["radius"] is not None else r"$\infty$",
                         b["scale_engines"]])
-    tables.append(table("CurrentAdaptiveCalibrationTable", "Observable interval scales and radii of the frozen format-10 model.",
+    tables.append(table("CurrentAdaptiveCalibrationTable", "Observable interval scales and radii of the frozen model.",
         "tab:adaptive_calibration", "lrrrrr",
         r"Predicted RUL bin & Scale capped & Scale raw & Radius capped & Radius raw & Scale engines", calrows,
         rf"Scales use selection engines only. A single engine-maximum normalized score spans all bins and is calibrated on {calibration['engines']} separate engines; alpha={calibration['alpha']:g}, rank={calibration['rank']}. Scale-engine counts are overlapping bin support, not independent calibration sample counts. No true RUL is required to choose a bin at inference."))
@@ -389,7 +355,7 @@ def main(argv=None):
         band_rows, r"Bands are chosen from the raw target for description only; inference uses the predicted-RUL bin. Coverage is marginal over engines and prefixes, not conditional on a realized engine. Raw width can be unbounded; mean widths include finite values only and are descriptive."))
 
     write("current_results_tables.tex", "% Generated from hashed saved numerical evidence.\n\n" + "\n".join(tables))
-    draw_figures(official, internal, baseline, preserved, predictions, report)
+    draw_figures(official, internal, predictions)
 
     # Detector and recovery tables.
     contexts = detector_selected["contexts"]
@@ -402,7 +368,7 @@ def main(argv=None):
         detector_rows.append([family, scope, f1, recall, f"{100 * item['false_positive_rate']:.2f}"])
     detector_table = table("CurrentDetectorTable", "Held-validation detector operating point at severity 0.2.",
         "tab:detector", "llrrr", r"Family & Scope & F1 & Recall & False positive (\%)", detector_rows,
-        r"Thresholds are frozen deployment buffers at the 5\% per-channel/context intact false-positive ceiling (maximum source/context FPR is 0.0500, attained by FD003). Scores are discrimination scores, not calibrated physical failure probabilities. Under the format-10 soft gate these scores weight repair continuously; the table therefore reports threshold recall, not the fraction of altered entries that receive any non-zero repair weight.")
+        r"Thresholds are frozen deployment buffers at the 5\% per-channel/context intact false-positive ceiling (maximum subset/context FPR is 0.0500, attained by FD003). Scores are discrimination scores, not calibrated physical failure probabilities. Under the deployed soft gate these scores weight repair continuously; the table therefore reports threshold recall, not the fraction of altered entries that receive any non-zero repair weight.")
 
     recovery_rows = []
     for family in ["clean", "intermittent", "outage", "block", "noise", "bias", "drift", "stuck", "mixed"]:
@@ -438,8 +404,8 @@ positives are {100 * clean_fpr:.4f}\\% of intact entries, while finite-fault rec
 is {contexts['drift']['recall']:.2f} for drift,
 {contexts['bias']['recall']:.2f} for bias, {contexts['noise']['recall']:.2f} for
 noise, and {contexts['stuck']['recall']:.2f} for stuck under the 5\\% context false-positive
-rate ceiling. Across held selection contexts, the maximum source/context false-positive rate is 0.0500 (5.00\\%), attained by FD003, meeting the declared 5\\% ceiling.
-The format-10 gate is not a hard threshold: it uses $p_j^3$ as a continuous
+rate ceiling. Across held selection contexts, the maximum subset/context false-positive rate is 0.0500 (5.00\\%), attained by FD003, meeting the declared 5\\% ceiling.
+The deployed gate is not a hard threshold: it uses $p_j^3$ as a continuous
 repair weight, with $\\tau_j=1$ as the only hard disable switch. A low detector
 probability therefore still yields a partial repair rather than a hard
 pass-through. This mitigates
@@ -481,7 +447,7 @@ intact-cell guards.
         plateau_sentence = (f"The monotone plateau stretch was available, but its non-increasing capped-RMSE "
                             f"guard rejected every positive value (alpha=0), so the raw-target bias is not "
                             f"reduced.")
-    abstract = rf"""Remaining useful life (RUL) prediction must distinguish degradation from measurement failures across operating conditions. GRACE-RUL combines local CNN--GRU features, residual BiLSTM sensor recovery, Transformer context, an independent finite-fault detector and a validation-audited RUL path. Format 10 adds an observed engine-age channel and supervises continuity on the deployed repair path; it disables the bounded corrector after a null component ablation and replaces the hard repair threshold with probability-weighted soft gating. One shared model pools all four NASA C-MAPSS subsets with {parts['fit']} fitting, {parts['validation']} selection, {parts['calibration']} calibration and {parts['test']} internal-test engines. Faults follow related-channel, temporally persistent mechanisms in raw sensor units. Conservative thresholds, fitting-only support bounds and a complete {summary['recovery_contexts']}-condition audit limit healthy-sensor displacement, with refined detector recall across drift, bias, noise and stuck faults. Predictor refinement uses active-path paired-prefix continuity, fitting-error tails and corruption-aware RUL supervision. A validation-selected candidate is frozen before interval calibration and test evaluation. On {int(c.N)} official endpoints its capped RMSE is {c.RMSE:.2f} cycles, MAE is {c.MAE:.2f}, and severity-0.2 stuck-fault RMSE averages {stuck2:.2f} over three corruption replicates. Internal clean RMSE is {h.RMSE:.2f} over {int(h.N)} prefixes from {parts['test']} engines. Observable interval scales are fitted independently of engine-level conformal calibration. Raw RMSE is {long['raw_RMSE']:.2f}; {long['long_N']} engines with raw RUL above 125 account for {100 * long['long_share_squared_error']:.1f}\% of raw squared error. {plateau_sentence} A previously inspected severe prediction failure is reported explicitly.{noise_sentence} Reused benchmarks, one training seed and simulated faults limit generalization claims.
+    abstract = rf"""Remaining useful life (RUL) prediction must distinguish degradation from measurement failures across operating conditions. GRACE-RUL combines local CNN--GRU features, residual BiLSTM sensor recovery, Transformer context, an independent finite-fault detector and a validation-audited RUL path. The deployed pipeline adds an observed engine-age channel and supervises continuity on the repair path; it disables the bounded corrector after a null component ablation and replaces the hard repair threshold with probability-weighted soft gating. One shared model pools all four NASA C-MAPSS subsets with {parts['fit']} fitting, {parts['validation']} selection, {parts['calibration']} calibration and {parts['test']} internal-test engines. Faults follow related-channel, temporally persistent mechanisms in raw sensor units. Conservative thresholds, fitting-only support bounds and a complete {summary['recovery_contexts']}-condition audit limit healthy-sensor displacement, with refined detector recall across drift, bias, noise and stuck faults. Predictor refinement uses active-path paired-prefix continuity, fitting-error tails and corruption-aware RUL supervision. A validation-selected candidate is frozen before interval calibration and test evaluation. On {int(c.N)} official endpoints its capped RMSE is {c.RMSE:.2f} cycles, MAE is {c.MAE:.2f}, and severity-0.2 stuck-fault RMSE averages {stuck2:.2f} over three corruption replicates. Internal clean RMSE is {h.RMSE:.2f} over {int(h.N)} prefixes from {parts['test']} engines. Observable interval scales are fitted independently of engine-level conformal calibration. Raw RMSE is {long['raw_RMSE']:.2f}; {long['long_N']} engines with raw RUL above 125 account for {100 * long['long_share_squared_error']:.1f}\% of raw squared error. {plateau_sentence} A previously inspected severe prediction failure is reported explicitly.{noise_sentence} Reused benchmarks, one training seed and simulated faults limit generalization claims.
 """
     write("current_abstract.tex", abstract.replace("\\n", "\n"))
 
@@ -490,26 +456,25 @@ intact-cell guards.
                   f"Five validation guards (clean RMSE, clean NASA, mixed RMSE, stuck RMSE and engine tail) plus "
                   f"the detector and complete recovery audits define acceptance. ")
     write("current_refinement_summary.tex", refinement +
-          rf"The deployed detector audit uses the actual saved gates, with clean selection FPR {100 * clean_fpr:.4f}\% and maximum source/context FPR 0.0500 (attained by FD003, meeting the 5\% ceiling). The {summary['recovery_contexts']}-context recovery audit has worst pooled-context intact displacement {worst['linear_intact_repair_RMSE']:.5f} in standardized linear sensor coordinates and worst window RMSE {worst['linear_intact_window_RMSE_max']:.5f} (the separate post-freeze official severity-0.2 benchmark gives approximately 0.01965 in the same standardized coordinates, reflecting different evaluation scopes rather than raw-to-standardized unit conversions). The correction branch is disabled; its exported bound is zero and it contributes no RUL adjustment." + "\n")
+          rf"The deployed detector audit uses the actual saved gates, with clean selection FPR {100 * clean_fpr:.4f}\% and maximum subset/context FPR 0.0500 (attained by FD003, meeting the 5\% ceiling). The {summary['recovery_contexts']}-context recovery audit has worst pooled-context intact displacement {worst['linear_intact_repair_RMSE']:.5f} in standardized linear sensor coordinates and worst window RMSE {worst['linear_intact_window_RMSE_max']:.5f} (the separate post-freeze official severity-0.2 benchmark gives approximately 0.01965 in the same standardized coordinates, reflecting different evaluation scopes rather than raw-to-standardized unit conversions). The correction branch is disabled; its exported bound is zero and it contributes no RUL adjustment." + "\n")
 
     section = rf"""\subsection{{\textbf{{Clean Accuracy and Evaluation Units}}}}
 \CurrentPooledResultsTable
-\CurrentComparisonTable
 \CurrentRawResultsTable
 \CurrentAdaptiveCalibrationTable
-The frozen shared format-10 model achieves official clean capped RMSE {c.RMSE:.4f} and MAE {c.MAE:.4f} cycles across {int(c.N)} endpoint engines. Original pooled revision 2 had RMSE {old.RMSE:.4f} on the reused official benchmark, and the preserved v9 source had {prior.RMSE:.4f}. Internal clean RMSE is {h.RMSE:.4f} against {prior_internal.RMSE:.4f} for the preserved source; its {int(h.N)} prefixes belong to {parts['test']} engines and are dependent within engine. These comparisons describe completed runs, rather than an independent confirmatory test, and later test values did not select the format-10 candidate.
+The frozen shared model achieves official clean capped RMSE {c.RMSE:.4f} and MAE {c.MAE:.4f} cycles across {int(c.N)} endpoint engines. Internal clean RMSE is {h.RMSE:.4f} over {int(h.N)} prefixes from {parts['test']} engines; these prefixes are dependent within engine. Both values are descriptive results from one completed pipeline and are not an independent confirmatory test.
 \begin{{figure*}}[tp]\centering
 \includegraphics[width=\textwidth]{{paper_assets/current_pooled_clean.pdf}}
-\caption{{Clean capped RMSE for the frozen format-10 model, its preserved v9 source, and original pooled revision 2. Each is one training-seed pipeline; no across-training-seed uncertainty is implied. Internal values use a fixed causal prefix grid.}}\label{{fig:pooled_clean}}
+\caption{{Clean capped RMSE of the frozen model by subset for official endpoints and internal prefixes. Internal values use a fixed causal prefix grid; the two partitions are not independent samples.}}\label{{fig:pooled_clean}}
 \end{{figure*}}
 
 \subsection{{\textbf{{Structured-Fault Robustness}}}}
-At severity 0.2, mean pooled official stuck-fault RMSE is {stuck2:.4f} cycles over three corruption realizations; mixed faults average {mixed2:.4f}. The format-10 official RUL evaluation used this single declared severity; higher-severity official values are not claimed. Fig.~\ref{{fig:pooled_faults}} exposes severity dependence on the pooled fleet and the multi-regime subsets for the preserved source, while the format-10 panel is limited to the evaluated severity. Corruptions preserve original RUL labels and do not represent recorded aircraft sensor incidents.
+At severity 0.2, mean pooled official stuck-fault RMSE is {stuck2:.4f} cycles over three corruption realizations; mixed faults average {mixed2:.4f}. The official RUL evaluation used this single declared severity; higher-severity official values are not claimed, while the held selection audit covers severities 0.1--0.5. Fig.~\ref{{fig:pooled_faults}} reports the two official fault families at the evaluated severity for the pooled fleet and the multi-regime subsets. Corruptions preserve original RUL labels and do not represent recorded aircraft sensor incidents.
 \begin{{figure*}}[tp]\centering
 \includegraphics[width=\textwidth]{{paper_assets/current_pooled_faults.pdf}}
 \par\smallskip
 \includegraphics[width=\textwidth]{{paper_assets/current_pooled_calibration.pdf}}
-\caption{{Top: official capped-target robustness under structured faults. Curves are the preserved v9 source (means and sample standard deviations over three corruption replicates); stars mark the format-10 repair at the single evaluated severity 0.2. Neither is a training-seed or fleet confidence interval. Bottom: empirical clean coverage and mean interval width grouped by observable predicted RUL. Grouped coverage is descriptive and does not establish conditional coverage for a realized engine or life stage.}}\label{{fig:pooled_faults}}\label{{fig:pooled_calibration}}
+\caption{{Top: official capped-target RMSE for stuck and mixed faults at severity 0.2. Bars average three corruption replicates; no training-seed or fleet confidence interval is implied. Bottom: empirical clean coverage and mean interval width grouped by observable predicted RUL. Grouped coverage is descriptive and does not establish conditional coverage for a realized engine or life stage.}}\label{{fig:pooled_faults}}\label{{fig:pooled_calibration}}
 \end{{figure*}}
 
 \subsection{{\textbf{{Calibration and Healthy-Sensor Impact}}}}
@@ -524,18 +489,18 @@ The capped target cannot distinguish an engine with 130 remaining cycles from on
 \caption{{Clean official prediction against capped and uncensored targets. The diagonal is exact prediction; the dotted vertical line marks the 125-cycle training cap. Points to the right of the cap expose the censoring bias summarized in Table~\ref{{tab:current_long}}.}}\label{{fig:pooled_longrul}}
 \end{{figure*}}
 
-\subsection{{\textbf{{Previously Inspected FD004 Engine 179}}}}
+\subsection{{\textbf{{FD004 Engine 179 Failure Case}}}}
 This case remains a post-freeze diagnostic and is excluded from selection. At cycle 240 the model predicts {float(engine179[engine179.unit.eq(4000179) & engine179.cycle.eq(240)].prediction.iloc[0]) if len(engine179[engine179.unit.eq(4000179) & engine179.cycle.eq(240)]) else float('nan'):.3f} against capped target {float(engine179[engine179.unit.eq(4000179) & engine179.cycle.eq(240)].target.iloc[0]) if len(engine179[engine179.unit.eq(4000179) & engine179.cycle.eq(240)]) else float('nan'):g}; its capped interval is [{float(engine179[engine179.unit.eq(4000179) & engine179.cycle.eq(240)].interval_lower_capped.iloc[0]) if len(engine179[engine179.unit.eq(4000179) & engine179.cycle.eq(240)]) else float('nan'):.3f}, {float(engine179[engine179.unit.eq(4000179) & engine179.cycle.eq(240)].interval_upper_capped.iloc[0]) if len(engine179[engine179.unit.eq(4000179) & engine179.cycle.eq(240)]) else float('nan'):.3f}]. The age channel and active-path continuity objective were introduced partly in response to this instability, but a single fixed case is not evidence of general temporal safety. Aggregate coverage cannot establish that this particular prediction is accurate or covered.
 \begin{{figure*}}[tp]\centering
 \includegraphics[width=\textwidth]{{paper_assets/current_pooled_engine179.pdf}}
-\caption{{Observed failure-case trajectory under the format-10 repair. Predictions and intervals are saved outputs of the frozen artifact. Colors in the lower panel identify fitted regimes; raw settings are not ground truth about a physical fault cause.}}\label{{fig:pooled_engine179}}
+\caption{{Observed failure-case trajectory for the frozen model. Predictions and intervals are saved outputs of the frozen artifact. Colors in the lower panel identify fitted regimes; raw settings are not ground truth about a physical fault cause.}}\label{{fig:pooled_engine179}}
 \end{{figure*}}
 
 \subsection{{\textbf{{Evidence and Reproducibility Boundaries}}}}
-Point metrics, counts and coverage are recomputed from saved predictions. All manuscript numbers and plotted values are tied to one completed run, with input/output SHA-256 hashes in \texttt{{paper\_assets/current\_provenance.json}}. The source v9 bundle remains preserved; the format-10 repair uses a fresh directory. This does not restore independence of previously inspected internal or official benchmark cases. Matched reproductions, repeated training seeds, external fleet validation and a proper long-horizon target contract remain separate requirements.
+Point metrics, counts and coverage are recomputed from saved predictions. All manuscript numbers and plotted values are tied to one completed run, with input/output SHA-256 hashes in \texttt{{paper\_assets/current\_provenance.json}}. The frozen artifact and its audit records are retained in a separate directory. This does not restore independence of previously inspected internal or official benchmark cases. Matched external reproductions, repeated training seeds, external fleet validation and a proper long-horizon target contract remain separate requirements.
 """
     write("current_results_section.tex", section)
-    write("current_conclusion.tex", rf"""The format-10 GRACE-RUL pipeline combines related-channel fault simulation, independent detection, probability-weighted support-bounded recovery and local/global RUL prediction with an observed engine-age channel. Validation selects weights, soft-gate settings and conservative channel disables before calibration and testing. Official capped RMSE is {c.RMSE:.2f} cycles and severity-0.2 stuck RMSE is {stuck2:.2f}; the complete recovery matrix bounds observed intact displacement in standardized sensor coordinates on held selection contexts. Observable scaling preserves one simultaneous calibration score per engine. Explicit failure analysis, separate coverage units and immutable provenance delimit the evidence. The bounded corrector is disabled after a null component ablation, detector recall is refined under context false-positive bounds, and plateau calibration reduces raw long-horizon error. {plateau_sentence} These results support an auditable benchmark study; they do not establish universal sensor recovery, zero severe prediction errors, superiority over matched re-implementations of the compared methods, or real-fleet safety.
+    write("current_conclusion.tex", rf"""The GRACE-RUL pipeline combines related-channel fault simulation, independent detection, probability-weighted support-bounded recovery and local/global RUL prediction with an observed engine-age channel. Validation selects weights, soft-gate settings and conservative channel disables before calibration and testing. Official capped RMSE is {c.RMSE:.2f} cycles and severity-0.2 stuck RMSE is {stuck2:.2f}; the complete recovery matrix bounds observed intact displacement in standardized sensor coordinates on held selection contexts. Observable scaling preserves one simultaneous calibration score per engine. Explicit failure analysis, separate coverage units and immutable provenance delimit the evidence. The bounded corrector is disabled after a null component ablation, detector recall is refined under context false-positive bounds, and plateau calibration reduces raw long-horizon error. {plateau_sentence} These results support an auditable benchmark study; they do not establish universal sensor recovery, zero severe prediction errors, superiority over external implementations, or real-fleet safety.
 """)
 
     for name in ["current_architecture.tex", "current_workflow.tex", "current_calibration_method.tex",
@@ -550,10 +515,9 @@ Point metrics, counts and coverage are recomputed from saved predictions. All ma
     (OUT / "current_run.json").write_text(json.dumps(
         {"run": key(RUN), "bundle_sha256": summary["bundle_sha256"]}, indent=2) + "\n")
     provenance = {"created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "scope": "Format-10 manuscript assets from one frozen run; no fitting, selection or inference",
-        "runs": {"v10_repair": key(RUN), "v9_source": key(args.source_run),
-                 "v9_revision2": key(args.baseline_run),
-                 **({"v10_recovery_benchmark": key(args.recovery_run)} if args.recovery_run else {})},
+        "scope": "Manuscript assets from one frozen run; no fitting, selection or inference",
+        "runs": {"final_run": key(RUN),
+                 **({"recovery_benchmark": key(args.recovery_run)} if args.recovery_run else {})},
         "bundle_sha256": summary["bundle_sha256"],
         "input_files": INPUTS,
         "generator_sha256": sha(Path(__file__)),
